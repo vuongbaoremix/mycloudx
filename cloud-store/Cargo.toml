@@ -1,0 +1,87 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cloudstore-api",
+    "crates/cloudstore-cache",
+    "crates/cloudstore-sync",
+    "crates/cloudstore-common",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+
+# HTTP framework
+axum = { version = "0.8", features = ["multipart"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Hashing
+sha2 = "0.10"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Configuration
+dotenvy = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# File system
+walkdir = "2"
+
+# Async trait
+async-trait = "0.1"
+
+# UUID (optional, for internal use)
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# MIME detection
+mime_guess = "2"
+
+# Streaming
+futures-util = "0.3"
+bytes = "1"
+
+# Byte size parsing
+bytesize = { version = "1", features = ["serde"] }
+
+# Google Drive API
+google-drive3 = "7"
+yup-oauth2 = "12"
+hyper = "1"
+hyper-rustls = { version = "0.27", features = ["http2", "webpki-tokio", "ring"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "tokio", "http2"] }
+mime = "0.3"
+http-body-util = "0.1"
+urlencoding = "2"
+
+# Workspace crates
+cloudstore-common = { path = "crates/cloudstore-common" }
+cloudstore-cache = { path = "crates/cloudstore-cache" }
+cloudstore-sync = { path = "crates/cloudstore-sync" }
+
+# === Tối ưu binary size ===
+[profile.release]
+opt-level = "z"       # Tối ưu cho size thay vì speed ("s" cũng OK, "z" nhỏ hơn)
+lto = true            # Link-Time Optimization - loại bỏ dead code across crates
+codegen-units = 1     # Biên dịch 1 unit → tối ưu hơn (compile chậm hơn)
+panic = "abort"       # Bỏ unwinding code → giảm ~10% size
+strip = true          # Xóa debug symbols → giảm rất nhiều

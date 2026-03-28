@@ -1,0 +1,28 @@
+services:
+  cloudstore:
+    image: "cloudstore:latest"
+    container_name: cloudstore
+    restart: unless-stopped
+    ports:
+      - "${CLOUDSTORE_PORT:-8080}:8080"
+    volumes:
+      # NVMe SSD mount -> container cache dir
+      # Change /mnt/nvme/cloudstore to your actual NVMe mount point
+      - ./cache:/data/cache
+      # Google Drive credentials (optional)
+      - ./secret/:/etc/cloudstore/
+    environment:
+      - CLOUDSTORE_PORT=8080
+      - CLOUDSTORE_CACHE_DIR=/data/cache
+      - CLOUDSTORE_CACHE_MAX_SIZE=${CLOUDSTORE_CACHE_MAX_SIZE:-500GB}
+      - CLOUDSTORE_LOG_LEVEL=${CLOUDSTORE_LOG_LEVEL:-info}
+      - CLOUDSTORE_SYNC_WORKERS=${CLOUDSTORE_SYNC_WORKERS:-4}
+      - GDRIVE_CREDENTIALS_PATH=/etc/cloudstore/client_secret.json
+    env_file:
+      - .env
+    healthcheck:
+      test: [ "NONE" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

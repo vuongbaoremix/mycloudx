@@ -1,0 +1,18 @@
+[package]
+name = "cloudstore-cache"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cloudstore-common = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+walkdir = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+mime_guess = { workspace = true }
+futures-util = { workspace = true }
+bytes = { workspace = true }

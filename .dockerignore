@@ -1,0 +1,7 @@
+node_modules
+target
+.git
+.next
+*.tar
+data
+uploads

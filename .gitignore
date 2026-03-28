@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+target/
+dist/
+package-lock.json
+
+# Build artifacts
+*.tar
+
+# Environment
+.env
+.env.local
+
+# Data
+data/
+
+# IDE
+.vscode/
+.idea/
+**/cache
+deploy

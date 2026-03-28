@@ -1,0 +1,10 @@
+pub mod admin;
+pub mod album;
+pub mod auth;
+pub mod health;
+pub mod media;
+pub mod mosaic;
+pub mod search;
+pub mod share;
+pub mod upload;
+pub mod user;

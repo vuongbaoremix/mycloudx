@@ -1,0 +1,22 @@
+[package]
+name = "cloudstore-sync"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cloudstore-common = { workspace = true }
+cloudstore-cache = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+google-drive3 = { workspace = true }
+yup-oauth2 = { workspace = true }
+hyper = { workspace = true }
+hyper-rustls = { workspace = true }
+hyper-util = { workspace = true }
+mime = { workspace = true }
+http-body-util = { workspace = true }
