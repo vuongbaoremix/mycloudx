@@ -63,6 +63,9 @@ bytes = "1"
 # Byte size parsing
 bytesize = { version = "1", features = ["serde"] }
 
+# SQLite
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "chrono", "json"] }
+
 # Google Drive API
 google-drive3 = "7"
 yup-oauth2 = "12"

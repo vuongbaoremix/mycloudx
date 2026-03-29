@@ -1,60 +1,108 @@
 use cloudstore_common::{CloudStoreError, FileMeta, PathId};
-use crate::cleaner::CacheCleaner;
 use crate::hasher;
 use crate::index::CacheIndex;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tokio::fs;
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::Row;
 
-/// NVMe cache engine: manages file read/write and `.meta.json` sidecar files.
+/// NVMe cache engine: manages file read/write and SQLite index.
 #[derive(Clone)]
 pub struct CacheEngine {
     /// Root directory for cached files.
     cache_root: PathBuf,
-    /// In-memory index.
+    /// SQLite backed index.
     index: CacheIndex,
-    /// Optional cache cleaner for LRU eviction.
-    cleaner: Option<CacheCleaner>,
+    /// Optional max cache size for LRU eviction.
+    max_size_bytes: Option<u64>,
 }
 
 impl CacheEngine {
-    /// Create a new CacheEngine and scan existing `.meta.json` files to build the index.
+    /// Create a new CacheEngine and run DB setup / json migration.
     pub async fn new(cache_root: PathBuf) -> Result<Self, CloudStoreError> {
-        // Ensure cache root exists.
-        fs::create_dir_all(&cache_root).await?;
-
-        let index = CacheIndex::new();
-        let engine = Self {
-            cache_root,
-            index,
-            cleaner: None,
-        };
-
-        // Scan existing meta files to rebuild index.
-        engine.rebuild_index().await?;
-
-        Ok(engine)
+        Self::create(cache_root, None).await
     }
 
     /// Create a new CacheEngine with a max cache size for LRU eviction.
-    pub async fn with_max_size(cache_root: PathBuf, max_size_bytes: u64) -> Result<Self, CloudStoreError> {
+    pub async fn with_max_size(
+        cache_root: PathBuf,
+        max_size_bytes: u64,
+    ) -> Result<Self, CloudStoreError> {
+        Self::create(cache_root, Some(max_size_bytes)).await
+    }
+
+    async fn create(
+        cache_root: PathBuf,
+        max_size_bytes: Option<u64>,
+    ) -> Result<Self, CloudStoreError> {
+        // Ensure cache root exists.
         fs::create_dir_all(&cache_root).await?;
 
-        let index = CacheIndex::new();
-        let cleaner = CacheCleaner::new(max_size_bytes);
-        let engine = Self {
-            cache_root,
-            index,
-            cleaner: Some(cleaner),
-        };
+        // Setup SQLite pool
+        let db_path = cache_root.join("cache.db");
+        let conn_str = format!(
+            "sqlite://{}",
+            db_path.display().to_string().replace('\\', "/")
+        );
 
-        engine.rebuild_index().await?;
+        let options = SqliteConnectOptions::from_str(&conn_str)
+            .map_err(|e| CloudStoreError::ProviderError { provider: "sqlite".into(), message: e.to_string() })?
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect_with(options)
+            .await
+            .map_err(|e| CloudStoreError::ProviderError { provider: "sqlite".into(), message: e.to_string() })?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS cache_meta (
+                path_id TEXT PRIMARY KEY,
+                original_name TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                mime_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                cloud_url TEXT,
+                cloud_provider TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                synced_at TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| CloudStoreError::ProviderError { provider: "sqlite".into(), message: e.to_string() })?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_cache_content_hash ON cache_meta (content_hash)")
+            .execute(&pool)
+            .await
+            .map_err(|e| CloudStoreError::ProviderError { provider: "sqlite".into(), message: e.to_string() })?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_cache_status ON cache_meta (status)")
+            .execute(&pool)
+            .await
+            .map_err(|e| CloudStoreError::ProviderError { provider: "sqlite".into(), message: e.to_string() })?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_cache_created_at ON cache_meta (created_at)")
+            .execute(&pool)
+            .await
+            .map_err(|e| CloudStoreError::ProviderError { provider: "sqlite".into(), message: e.to_string() })?;
+
+        let index = CacheIndex::new(pool);
+        let engine = Self { cache_root, index, max_size_bytes };
+
+        // Migrate legacy .meta.json files if index is empty
+        engine.migrate_legacy_json_to_sqlite().await?;
 
         Ok(engine)
     }
 
-    /// Get a reference to the in-memory index.
+    /// Get a reference to the SQLite-backed index.
     pub fn index(&self) -> &CacheIndex {
         &self.index
     }
@@ -76,7 +124,6 @@ impl CacheEngine {
         data: &[u8],
     ) -> Result<FileMeta, CloudStoreError> {
         let file_path = path_id.to_cache_path(&self.cache_root);
-        let meta_path = path_id.to_meta_path(&self.cache_root);
 
         // Ensure parent directories exist.
         if let Some(parent) = file_path.parent() {
@@ -104,10 +151,7 @@ impl CacheEngine {
             path_id.provider().to_string(),
         );
 
-        // Atomic write: write to temp then rename.
-        self.write_meta_atomic(&meta_path, &meta).await?;
-
-        // Update in-memory index.
+        // Update SQLite index.
         self.index.upsert(path_id, meta.clone()).await;
 
         info!(
@@ -135,11 +179,10 @@ impl CacheEngine {
         E: std::fmt::Display,
     {
         use futures_util::StreamExt;
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         use tokio::io::AsyncWriteExt;
 
         let file_path = path_id.to_cache_path(&self.cache_root);
-        let meta_path = path_id.to_meta_path(&self.cache_root);
 
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
@@ -176,7 +219,7 @@ impl CacheEngine {
             path_id.provider().to_string(),
         );
 
-        self.write_meta_atomic(&meta_path, &meta).await?;
+        // Update SQLite index.
         self.index.upsert(path_id, meta.clone()).await;
 
         info!(path_id = %path_id, size = size_bytes, "File streamed to cache");
@@ -211,29 +254,25 @@ impl CacheEngine {
         self.index.get(path_id).await
     }
 
-    /// Update file metadata (both index and disk).
+    /// Update file metadata (index).
     pub async fn update_meta(
         &self,
         path_id: &PathId,
         meta: FileMeta,
     ) -> Result<(), CloudStoreError> {
-        let meta_path = path_id.to_meta_path(&self.cache_root);
-        self.write_meta_atomic(&meta_path, &meta).await?;
         self.index.upsert(path_id, meta).await;
         Ok(())
     }
 
-    /// Delete a file from cache (both data file and meta).
+    /// Delete a file from cache (both data file and index).
     pub async fn delete(&self, path_id: &PathId) -> Result<Option<FileMeta>, CloudStoreError> {
         let file_path = path_id.to_cache_path(&self.cache_root);
-        let meta_path = path_id.to_meta_path(&self.cache_root);
 
         // Remove from index first.
         let removed = self.index.remove(path_id).await;
 
         // Delete files from disk (ignore "not found" errors).
         let _ = fs::remove_file(&file_path).await;
-        let _ = fs::remove_file(&meta_path).await;
 
         // Try to clean up empty parent directories.
         if let Some(parent) = file_path.parent() {
@@ -253,12 +292,14 @@ impl CacheEngine {
         self.index.list(provider, prefix).await
     }
 
-    /// Rebuild the in-memory index by scanning all `.meta.json` files on disk.
-    async fn rebuild_index(&self) -> Result<(), CloudStoreError> {
-        let cache_root = self.cache_root.clone();
-        let index = self.index.clone();
+    /// Migrate legacy `.meta.json` files to SQLite table if table is empty.
+    async fn migrate_legacy_json_to_sqlite(&self) -> Result<(), CloudStoreError> {
+        if self.index.len().await > 0 {
+            return Ok(());
+        }
 
-        // Use blocking walkdir in a spawn_blocking to avoid blocking the runtime.
+        let cache_root = self.cache_root.clone();
+
         let entries = tokio::task::spawn_blocking(move || {
             let mut entries = Vec::new();
             for entry in WalkDir::new(&cache_root)
@@ -281,12 +322,18 @@ impl CacheEngine {
         .await
         .map_err(|e| CloudStoreError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        info!("Starting migration of {} .meta.json files to SQLite...", entries.len());
+
         let mut count = 0;
-        for meta_path in entries {
-            match self.read_meta_file(&meta_path).await {
+        for meta_path in &entries {
+            match self.read_meta_file(meta_path).await {
                 Ok((path_id_str, meta)) => {
                     if let Ok(path_id) = PathId::parse(&path_id_str) {
-                        index.upsert(&path_id, meta).await;
+                        self.index.upsert(&path_id, meta).await;
                         count += 1;
                     }
                 }
@@ -295,8 +342,13 @@ impl CacheEngine {
                 }
             }
         }
+        
+        // Clean up the JSON files after migration
+        for meta_path in &entries {
+            let _ = fs::remove_file(meta_path).await;
+        }
 
-        info!(count, "Index rebuilt from .meta.json files");
+        info!(count, "Migrated .meta.json files to SQLite and deleted JSONs");
         Ok(())
     }
 
@@ -308,8 +360,6 @@ impl CacheEngine {
         let content = fs::read_to_string(meta_path).await?;
         let meta: FileMeta = serde_json::from_str(&content)?;
 
-        // Derive PathId from filesystem path relative to cache root.
-        // e.g. /data/cache/gdrive/photos/photo.jpg.meta.json → gdrive/photos/photo.jpg
         let relative = meta_path
             .strip_prefix(&self.cache_root)
             .map_err(|_| {
@@ -320,7 +370,6 @@ impl CacheEngine {
             })?;
 
         let path_str = relative.to_string_lossy().replace('\\', "/");
-        // Remove ".meta.json" suffix to get the path-id.
         let path_id_str = path_str
             .strip_suffix(".meta.json")
             .ok_or_else(|| {
@@ -329,19 +378,6 @@ impl CacheEngine {
             .to_string();
 
         Ok((path_id_str, meta))
-    }
-
-    /// Atomically write a `.meta.json` file (write temp → rename).
-    async fn write_meta_atomic(
-        &self,
-        meta_path: &Path,
-        meta: &FileMeta,
-    ) -> Result<(), CloudStoreError> {
-        let content = serde_json::to_string_pretty(meta)?;
-        let tmp_path = meta_path.with_extension("meta.json.tmp");
-        fs::write(&tmp_path, content.as_bytes()).await?;
-        fs::rename(&tmp_path, meta_path).await?;
-        Ok(())
     }
 
     /// Recursively remove empty directories up to (but not including) the stop directory.
@@ -363,33 +399,38 @@ impl CacheEngine {
         Ok(())
     }
 
-    /// Run LRU eviction if cache exceeds max size.
-    /// Deletes data files of `Synced` entries (oldest first), keeps `.meta.json`.
+    /// Run LRU eviction if cache exceeds max size based on SQLite status.
     async fn run_eviction(&self) {
-        let cleaner = match &self.cleaner {
-            Some(c) => c,
+        let target_size = match self.max_size_bytes {
+            Some(s) => s,
             None => return,
         };
 
-        if !cleaner.needs_eviction(&self.index).await {
+        let current_size = self.index.total_size_bytes().await;
+        if current_size <= target_size {
             return;
         }
 
-        let candidates = cleaner.eviction_candidates(&self.index).await;
-        let current_size = self.index.total_size_bytes().await;
-        let target_size = cleaner.max_size_bytes();
-        let mut freed: u64 = 0;
+        let overage = current_size - target_size;
+        let rows = sqlx::query("SELECT path_id, size_bytes FROM cache_meta WHERE status = 'synced' ORDER BY created_at ASC")
+            .fetch_all(&self.index.pool)
+            .await
+            .unwrap_or_default();
 
-        for (path_id_str, size) in candidates {
-            if current_size - freed <= target_size {
+        let mut freed: u64 = 0;
+        for row in rows {
+            if freed >= overage {
                 break;
             }
 
+            let path_id_str: String = row.try_get("path_id").unwrap_or_default();
+            let size_bytes: i64 = row.try_get("size_bytes").unwrap_or(0);
+            
             if let Ok(path_id) = PathId::parse(&path_id_str) {
                 let file_path = path_id.to_cache_path(&self.cache_root);
                 if fs::remove_file(&file_path).await.is_ok() {
-                    freed += size;
-                    info!(path_id = %path_id_str, size, "Evicted cached file (data only)");
+                    freed += size_bytes as u64;
+                    info!(path_id = %path_id_str, size = size_bytes, "Evicted cached file (data only)");
                 }
             }
         }
@@ -400,8 +441,10 @@ impl CacheEngine {
     }
 
     /// Start a background task that periodically runs LRU eviction.
-    /// Returns a JoinHandle that can be used to cancel the task.
-    pub fn start_eviction_task(&self, interval: std::time::Duration) -> tokio::task::JoinHandle<()> {
+    pub fn start_eviction_task(
+        &self,
+        interval: std::time::Duration,
+    ) -> tokio::task::JoinHandle<()> {
         let engine = self.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);

@@ -16,3 +16,4 @@ async-trait = { workspace = true }
 mime_guess = { workspace = true }
 futures-util = { workspace = true }
 bytes = { workspace = true }
+sqlx = { workspace = true }

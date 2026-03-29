@@ -1,85 +1,104 @@
-use cloudstore_common::{CloudStoreError, FileMeta, PathId};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use cloudstore_common::{CloudStoreError, FileMeta, FileStatus, PathId};
+use sqlx::{Row, SqlitePool};
 
-/// In-memory index of all file metadata.
-/// Built on startup by scanning `.meta.json` files, kept in sync during runtime.
-#[derive(Debug, Clone)]
+/// SQLite-backed index of all file metadata.
+#[derive(Clone, Debug)]
 pub struct CacheIndex {
-    inner: Arc<RwLock<HashMap<String, FileMeta>>>,
-    total_size: Arc<AtomicU64>,
+    pub pool: SqlitePool,
 }
 
 impl CacheIndex {
-    /// Create a new empty index.
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(HashMap::new())),
-            total_size: Arc::new(AtomicU64::new(0)),
-        }
-    }
-
-    /// Create an index pre-populated with entries.
-    pub fn with_entries(entries: HashMap<String, FileMeta>) -> Self {
-        let size: u64 = entries.values().map(|m| m.size_bytes).sum();
-        Self {
-            inner: Arc::new(RwLock::new(entries)),
-            total_size: Arc::new(AtomicU64::new(size)),
-        }
+    /// Create a new index wrapping a sqlite pool.
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
     }
 
     /// Insert or update a file metadata entry.
     pub async fn upsert(&self, path_id: &PathId, meta: FileMeta) {
-        let mut map = self.inner.write().await;
-        let old_size = map.insert(path_id.as_str().to_string(), meta.clone())
-            .map(|m| m.size_bytes)
-            .unwrap_or(0);
+        let status_str = meta.status.to_string();
         
-        if old_size != meta.size_bytes {
-            if old_size > 0 {
-                self.total_size.fetch_sub(old_size, Ordering::Relaxed);
-            }
-            if meta.size_bytes > 0 {
-                self.total_size.fetch_add(meta.size_bytes, Ordering::Relaxed);
-            }
+        let res = sqlx::query(
+            "INSERT INTO cache_meta (
+                path_id, original_name, content_hash, size_bytes, mime_type, status,
+                cloud_url, cloud_provider, created_at, synced_at, retry_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(path_id) DO UPDATE SET
+                original_name = excluded.original_name,
+                content_hash = excluded.content_hash,
+                size_bytes = excluded.size_bytes,
+                mime_type = excluded.mime_type,
+                status = excluded.status,
+                cloud_url = excluded.cloud_url,
+                cloud_provider = excluded.cloud_provider,
+                created_at = excluded.created_at,
+                synced_at = excluded.synced_at,
+                retry_count = excluded.retry_count"
+        )
+        .bind(path_id.as_str())
+        .bind(&meta.original_name)
+        .bind(&meta.content_hash)
+        .bind(meta.size_bytes as i64)
+        .bind(&meta.mime_type)
+        .bind(&status_str)
+        .bind(&meta.cloud_url)
+        .bind(&meta.cloud_provider)
+        .bind(&meta.created_at)
+        .bind(&meta.synced_at)
+        .bind(meta.retry_count as i64)
+        .execute(&self.pool)
+        .await;
+
+        if let Err(e) = res {
+            tracing::error!("Failed to upsert cache_meta for {}: {}", path_id, e);
         }
     }
 
     /// Get file metadata by path ID.
     pub async fn get(&self, path_id: &PathId) -> Option<FileMeta> {
-        let map = self.inner.read().await;
-        map.get(path_id.as_str()).cloned()
+        let row = sqlx::query("SELECT * FROM cache_meta WHERE path_id = ?")
+            .bind(path_id.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .ok()??;
+
+        Self::map_row(&row)
     }
 
     /// Remove a file metadata entry.
     pub async fn remove(&self, path_id: &PathId) -> Option<FileMeta> {
-        let mut map = self.inner.write().await;
-        if let Some(meta) = map.remove(path_id.as_str()) {
-            self.total_size.fetch_sub(meta.size_bytes, Ordering::Relaxed);
-            Some(meta)
-        } else {
-            None
+        // Need to return it before deleting (or just select then delete)
+        let meta = self.get(path_id).await;
+        if meta.is_some() {
+            let _ = sqlx::query("DELETE FROM cache_meta WHERE path_id = ?")
+                .bind(path_id.as_str())
+                .execute(&self.pool)
+                .await;
         }
+        meta
     }
 
     /// Check if a path ID exists in the index.
     pub async fn contains(&self, path_id: &PathId) -> bool {
-        let map = self.inner.read().await;
-        map.contains_key(path_id.as_str())
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM cache_meta WHERE path_id = ?")
+            .bind(path_id.as_str())
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+        count > 0
     }
 
     /// Get the total number of entries.
     pub async fn len(&self) -> usize {
-        let map = self.inner.read().await;
-        map.len()
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM cache_meta")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+        count as usize
     }
 
     /// Check if the index is empty.
     pub async fn is_empty(&self) -> bool {
-        let map = self.inner.read().await;
-        map.is_empty()
+        self.len().await == 0
     }
 
     /// List all entries matching a provider and optional path prefix.
@@ -88,32 +107,55 @@ impl CacheIndex {
         provider: &str,
         prefix: Option<&str>,
     ) -> Vec<(String, FileMeta)> {
-        let map = self.inner.read().await;
         let search_prefix = match prefix {
-            Some(p) => format!("{}/{}", provider, p.trim_start_matches('/')),
-            None => format!("{}/", provider),
+            Some(p) => format!("{}/{}%", provider, p.trim_start_matches('/')),
+            None => format!("{}/%", provider),
         };
-        map.iter()
-            .filter(|(k, _)| k.starts_with(&search_prefix))
-            .map(|(k, v)| (k.clone(), v.clone()))
+
+        let rows = sqlx::query("SELECT * FROM cache_meta WHERE path_id LIKE ? AND cloud_provider = ?")
+            .bind(&search_prefix)
+            .bind(provider)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+
+        rows.into_iter()
+            .filter_map(|row| {
+                let path_id: String = row.try_get("path_id").ok()?;
+                let meta = Self::map_row(&row)?;
+                Some((path_id, meta))
+            })
             .collect()
     }
 
     /// List entries by status.
     pub async fn list_by_status(
         &self,
-        status: &cloudstore_common::FileStatus,
+        status: &FileStatus,
     ) -> Vec<(String, FileMeta)> {
-        let map = self.inner.read().await;
-        map.iter()
-            .filter(|(_, v)| &v.status == status)
-            .map(|(k, v)| (k.clone(), v.clone()))
+        let status_str = status.to_string();
+        let rows = sqlx::query("SELECT * FROM cache_meta WHERE status = ?")
+            .bind(&status_str)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+
+        rows.into_iter()
+            .filter_map(|row| {
+                let path_id: String = row.try_get("path_id").ok()?;
+                let meta = Self::map_row(&row)?;
+                Some((path_id, meta))
+            })
             .collect()
     }
 
     /// Get total cached size in bytes.
     pub async fn total_size_bytes(&self) -> u64 {
-        self.total_size.load(Ordering::Relaxed)
+        let total: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size_bytes), 0) FROM cache_meta")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+        total as u64
     }
 
     /// Update a specific entry using a closure.
@@ -121,42 +163,52 @@ impl CacheIndex {
     where
         F: FnOnce(&mut FileMeta),
     {
-        let mut map = self.inner.write().await;
-        let entry = map
-            .get_mut(path_id.as_str())
+        let mut meta = self
+            .get(path_id)
+            .await
             .ok_or_else(|| CloudStoreError::NotFound(path_id.to_string()))?;
         
-        let old_size = entry.size_bytes;
-        updater(entry);
-        let new_size = entry.size_bytes;
-        
-        if old_size != new_size {
-            if old_size > 0 {
-                self.total_size.fetch_sub(old_size, Ordering::Relaxed);
-            }
-            if new_size > 0 {
-                self.total_size.fetch_add(new_size, Ordering::Relaxed);
-            }
-        }
+        updater(&mut meta);
+        self.upsert(path_id, meta).await;
         Ok(())
     }
 
     /// Find ANY Synced entry with the given content hash (for dedup).
     /// Returns the cloud_url if found.
     pub async fn find_synced_by_hash(&self, content_hash: &str) -> Option<String> {
-        let map = self.inner.read().await;
-        map.values()
-            .find(|m| {
-                m.status == cloudstore_common::FileStatus::Synced
-                    && m.content_hash == content_hash
-                    && m.cloud_url.is_some()
-            })
-            .and_then(|m| m.cloud_url.clone())
+        let status_str = FileStatus::Synced.to_string();
+        sqlx::query_scalar(
+            "SELECT cloud_url FROM cache_meta WHERE content_hash = ? AND status = ? AND cloud_url IS NOT NULL LIMIT 1"
+        )
+        .bind(content_hash)
+        .bind(&status_str)
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap_or(None)
+    }
+
+    fn map_row(row: &sqlx::sqlite::SqliteRow) -> Option<FileMeta> {
+        let status_str: String = row.try_get("status").ok()?;
+        let status = match status_str.as_str() {
+            "cached" => FileStatus::Cached,
+            "syncing" => FileStatus::Syncing,
+            "synced" => FileStatus::Synced,
+            "sync_failed" => FileStatus::SyncFailed,
+            _ => FileStatus::Cached,
+        };
+
+        Some(FileMeta {
+            original_name: row.try_get("original_name").ok()?,
+            content_hash: row.try_get("content_hash").ok()?,
+            size_bytes: row.try_get::<i64, _>("size_bytes").ok()? as u64,
+            mime_type: row.try_get("mime_type").ok()?,
+            status,
+            cloud_url: row.try_get("cloud_url").ok()?,
+            cloud_provider: row.try_get("cloud_provider").ok()?,
+            created_at: row.try_get("created_at").ok()?,
+            synced_at: row.try_get("synced_at").ok()?,
+            retry_count: row.try_get::<i64, _>("retry_count").ok()? as u32,
+        })
     }
 }
 
-impl Default for CacheIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
