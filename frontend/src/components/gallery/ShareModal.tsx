@@ -27,9 +27,9 @@ export default function ShareModal({ selectedCount, selectedItems, onClose }: Sh
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-md z-[200] flex items-center justify-center p-4 animate-fadeIn">
-      <div className="bg-surface rounded-3xl p-8 w-full max-w-md shadow-2xl border border-outline-variant/10 animate-slideUpSpring">
-        <h3 className="text-2xl font-bold font-headline mb-6 text-on-surface tracking-tight">Chia sẻ {selectedCount} ảnh</h3>
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-md z-[200] flex items-end md:items-center justify-center md:p-4 animate-fadeIn">
+      <div className="bg-surface rounded-t-3xl md:rounded-3xl p-6 md:p-8 pb-[calc(1.5rem+env(safe-area-inset-bottom))] md:pb-8 w-full max-w-md shadow-2xl border-t md:border border-outline-variant/10 animate-slideUpSpring max-h-[90vh] overflow-y-auto">
+        <h3 className="text-xl md:text-2xl font-bold font-headline mb-4 md:mb-6 text-on-surface tracking-tight">Chia sẻ {selectedCount} ảnh</h3>
 
         {!shareLink ? (
           <div className="space-y-5">
@@ -56,9 +56,9 @@ export default function ShareModal({ selectedCount, selectedItems, onClose }: Sh
               <p className="text-xs text-on-surface-variant mt-1">Để trống nếu không muốn giới hạn lượt xem.</p>
             </div>
 
-            <div className="flex gap-3 justify-end mt-8">
-              <button className="btn btn-secondary px-6" onClick={onClose}>Hủy</button>
-              <button className="btn btn-primary px-6" onClick={handleShareSelected}>Tạo Link Mới</button>
+            <div className="flex flex-col-reverse md:flex-row gap-3 justify-end mt-8">
+              <button className="btn btn-secondary px-6 active:scale-95" onClick={onClose}>Hủy</button>
+              <button className="btn btn-primary px-6 active:scale-95" onClick={handleShareSelected}>Tạo Link Mới</button>
             </div>
           </div>
         ) : (

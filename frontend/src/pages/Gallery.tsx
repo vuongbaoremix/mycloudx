@@ -9,6 +9,7 @@ import VirtualizedMediaGrid from '../components/gallery/VirtualizedMediaGrid'
 import SelectionActionBar from '../components/gallery/SelectionActionBar'
 import AlbumModal from '../components/gallery/AlbumModal'
 import ShareModal from '../components/gallery/ShareModal'
+import { useConfirm } from '../contexts/ConfirmContext'
 
 type ViewMode = 'timeline' | 'grid-large' | 'grid-medium' | 'grid-small'
 
@@ -83,8 +84,15 @@ export default function Gallery({ title = "Photos", filterMimeType }: GalleryPro
     }
   }, [selectionMode, toggleSelection])
 
+  const { confirm } = useConfirm()
+
   const handleMultiDelete = async () => {
-    if (!confirm(`Delete ${selectedItems.size} items?`)) return
+    if (!await confirm({
+      title: 'Xóa ảnh đã chọn',
+      message: `Bạn có chắc chắn muốn xóa ${selectedItems.size} mục này không? Các thiết bị đã đồng bộ cũng có thể mất dữ liệu.`,
+      confirmText: 'Xóa',
+      isDestructive: true
+    })) return
     try {
       await Promise.all(Array.from(selectedItems).map(id => api.deleteMedia(id)))
       cancelSelection()
@@ -138,7 +146,7 @@ export default function Gallery({ title = "Photos", filterMimeType }: GalleryPro
   }
 
   return (
-    <div className="max-w-[1800px] mx-auto px-1 md:px-8 py-1 md:py-10" ref={galleryRef} onMouseDown={handleGalleryMouseDown}>
+    <div className="max-w-[1800px] mx-auto px-0 md:px-8 py-1 md:py-10" ref={galleryRef} onMouseDown={handleGalleryMouseDown}>
       {/* Drag-to-select rectangle overlay */}
       {dragRect && (
         <div

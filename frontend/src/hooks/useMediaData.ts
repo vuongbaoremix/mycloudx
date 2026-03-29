@@ -85,12 +85,17 @@ export function useMediaData({ filterMimeType }: UseMediaDataOptions = {}) {
     setTotalItems((prev) => prev + 1)
   }
 
-  // Polling for processing items
-  useEffect(() => {
-    const processingIds = media.filter(m => m.status === 'processing').map(m => m.id)
-    if (processingIds.length === 0) return
+  // Keep a ref to media for polling without re-triggering the effect
+  const mediaRef = useRef(media)
+  mediaRef.current = media
 
+  // Polling for processing items — use ref to avoid interval recreation on media change
+  useEffect(() => {
     const intervalId = setInterval(async () => {
+      const currentMedia = mediaRef.current
+      const processingIds = currentMedia.filter(m => m.status === 'processing').map(m => m.id)
+      if (processingIds.length === 0) return
+
       try {
         const idsToCheck = processingIds.slice(0, 10)
         const checks = await Promise.all(idsToCheck.map(id => api.getMedia(id).catch(() => null)))
@@ -117,7 +122,7 @@ export function useMediaData({ filterMimeType }: UseMediaDataOptions = {}) {
     }, 5000)
 
     return () => clearInterval(intervalId)
-  }, [media])
+  }, [])
 
   const handleToggleFavorite = async (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()

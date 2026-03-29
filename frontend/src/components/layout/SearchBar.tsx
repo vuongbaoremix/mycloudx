@@ -41,39 +41,47 @@ export default function SearchBar() {
       />
       
       {showDropdown && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-surface/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-outline-variant/20 overflow-hidden z-50 animate-slideUp">
-          {loading && <div className="p-4 text-center"><div className="spinner mx-auto" /></div>}
+        <>
+          {/* Mobile Fullscreen Backdrop */}
+          <div className="fixed inset-0 z-[60] bg-surface/95 backdrop-blur-xl md:hidden animate-fadeIn" onClick={() => setShowDropdown(false)} />
           
-          {!loading && results.length > 0 && (
-            <div className="max-h-80 overflow-y-auto p-2 space-y-1">
-              {results.slice(0, 8).map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-container cursor-pointer transition-colors"
-                  onClick={() => navigate('/')}
-                >
-                  {item.thumbnails?.micro ? (
-                    <img src={item.thumbnails.micro} alt="" className="w-10 h-10 rounded-md object-cover" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-md bg-surface-container-high" />
-                  )}
-                  <div>
-                    <div className="text-sm font-medium text-on-surface">{item.original_name}</div>
-                    <div className="text-xs text-on-surface-variant">
-                      {item.width && `${item.width}×${item.height}`}
+          <div className="fixed inset-x-0 top-[calc(3rem+env(safe-area-inset-top))] bottom-[calc(4rem+env(safe-area-inset-bottom))] z-[70] md:absolute md:inset-auto md:top-full md:left-0 md:right-0 md:mt-2 bg-surface/90 md:backdrop-blur-2xl md:rounded-2xl md:shadow-2xl md:border border-outline-variant/20 overflow-hidden md:z-50 animate-slideUp">
+            {loading && <div className="p-4 text-center"><div className="spinner mx-auto" /></div>}
+            
+            {!loading && results.length > 0 && (
+              <div className="h-full md:max-h-80 overflow-y-auto p-2 md:p-2 space-y-1 pb-[env(safe-area-inset-bottom)] md:pb-2">
+                {results.slice(0, 8).map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-3 p-3 md:p-2 rounded-xl hover:bg-surface-container cursor-pointer transition-colors active:scale-95 md:active:scale-100"
+                    onClick={() => {
+                      setShowDropdown(false)
+                      navigate('/')
+                    }}
+                  >
+                    {item.thumbnails?.micro ? (
+                      <img src={item.thumbnails.micro} alt="" className="w-12 h-12 md:w-10 md:h-10 rounded-lg object-cover shadow-sm" />
+                    ) : (
+                      <div className="w-12 h-12 md:w-10 md:h-10 rounded-lg bg-surface-container-high shadow-sm" />
+                    )}
+                    <div>
+                      <div className="text-sm md:text-sm font-semibold text-on-surface">{item.original_name}</div>
+                      <div className="text-xs text-on-surface-variant font-medium mt-0.5">
+                        {item.width && `${item.width}×${item.height}`}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
 
-          {!loading && query.length >= 2 && results.length === 0 && (
-            <div className="p-4 text-center text-sm text-on-surface-variant">
-              Không tìm thấy kết quả cho "{query}"
-            </div>
-          )}
-        </div>
+            {!loading && query.length >= 2 && results.length === 0 && (
+              <div className="p-8 md:p-4 text-center text-sm md:text-sm text-on-surface-variant font-medium">
+                Không tìm thấy kết quả cho "{query}"
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

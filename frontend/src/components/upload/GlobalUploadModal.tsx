@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react'
 import { Upload, CheckCircle, AlertCircle, X, Minus, FileImage } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import api from '../../api/client'
@@ -17,13 +17,99 @@ interface UploadItem {
 // periodic flush (every 300ms) does. This prevents hundreds of setStates/sec.
 type MutableItem = UploadItem
 
+const UploadList = memo(({ items }: { items: UploadItem[] }) => {
+  const listRef = useRef<HTMLDivElement>(null)
+  
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 76,
+    overscan: 10,
+  })
+
+  return (
+    <div ref={listRef} className="flex-1 overflow-y-auto px-3 md:px-6 pb-3 md:pb-6 relative w-full transform-gpu">
+      <div
+        style={{
+          height: `${rowVirtualizer.getTotalSize()}px`,
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+          const item = items[virtualRow.index]
+          if (!item) return null
+          return (
+            <div
+              key={item.id}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: `${virtualRow.size}px`,
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+              className="pb-3"
+            >
+              <div className="bg-surface p-3 rounded-xl shadow-sm border border-outline-variant/10 flex items-center gap-3 h-full">
+                <div className="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center shrink-0 overflow-hidden relative">
+                  {item.previewUrl ? (
+                    <img src={item.previewUrl} className="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <FileImage size={20} className="text-on-surface-variant" />
+                  )}
+                  {item.status === 'done' && (
+                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                      <div className="bg-white rounded-full">
+                        <CheckCircle size={16} className="text-success" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-semibold text-on-surface truncate pr-2">{item.fileName}</p>
+                    {item.status === 'uploading' && <span className="text-xs font-bold text-primary">{Math.round(item.progress)}%</span>}
+                  </div>
+                  {item.status === 'uploading' ? (
+                    <div className="h-1.5 w-full bg-surface-container rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-primary transition-transform duration-300 origin-left" 
+                        style={{ transform: `scaleX(${item.progress / 100})` }}
+                      ></div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-on-surface-variant font-medium">
+                      {item.status === 'done'
+                        ? 'Completed'
+                        : item.status === 'error'
+                        ? <span className="text-danger flex flex-wrap items-center gap-1 line-clamp-2" title={item.error}><AlertCircle size={12} className="shrink-0" /> {item.error || 'Failed'}</span>
+                        : 'Waiting...'}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {items.length === 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-on-surface-variant pointer-events-none">
+          <span className="material-symbols-outlined text-4xl mb-2 opacity-50" data-icon="inbox">inbox</span>
+          <p className="text-sm font-medium">Danh sách trống</p>
+        </div>
+      )}
+    </div>
+  )
+})
+
 export default function GlobalUploadModal() {
   const [isOpen, setIsOpen] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
   const [items, setItems] = useState<UploadItem[]>([])
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
 
   // Mutable map for O(1) updates by id — avoids full-array-scan on every progress event
   const itemsMapRef = useRef<Map<string, MutableItem>>(new Map())
@@ -31,13 +117,6 @@ export default function GlobalUploadModal() {
   const itemIdsRef = useRef<string[]>([])
   // Dirty flag: flush to React state only when something changed
   const dirtyRef = useRef(false)
-
-  const rowVirtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => listRef.current,
-    estimateSize: () => 76,
-    overscan: 10,
-  })
 
   // Periodic flush: update React state at most once per 300ms
   useEffect(() => {
@@ -166,16 +245,16 @@ export default function GlobalUploadModal() {
     setItems([])
   }, [])
 
-  const doneCount = items.filter((i) => i.status === 'done').length
+  const doneCount = useMemo(() => items.filter((i) => i.status === 'done').length, [items])
   const totalCount = items.length
   const percent = totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100)
-  const isUploading = items.some((i) => i.status === 'uploading' || i.status === 'pending')
+  const isUploading = useMemo(() => items.some((i) => i.status === 'uploading' || i.status === 'pending'), [items])
 
   if (!isOpen || isMinimized) {
     const isBusy = (totalCount > 0 && doneCount < totalCount) && isMinimized;
     return (
       <div 
-        className={`fixed bottom-6 right-6 md:bottom-10 md:right-10 z-[90] flex items-center shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer bg-gradient-to-br from-primary to-primary-container text-on-primary overflow-hidden ${isBusy ? 'rounded-full pr-6 pl-4 h-14 md:h-16 shadow-primary/40' : 'w-14 h-14 md:w-16 md:h-16 justify-center rounded-full shadow-primary/30'}`}
+        className={`fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-6 md:bottom-10 md:right-10 z-[90] flex items-center shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer bg-gradient-to-br from-primary to-primary-container text-on-primary overflow-hidden ${isBusy ? 'rounded-full pr-6 pl-4 h-14 md:h-16 shadow-primary/40' : 'w-14 h-14 md:w-16 md:h-16 justify-center rounded-full shadow-primary/30'}`}
         onClick={() => {
           setIsOpen(true);
           setIsMinimized(false);
@@ -213,7 +292,7 @@ export default function GlobalUploadModal() {
 
   return (
     <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm p-0 md:p-4">
-      <div className="bg-surface w-full md:w-[900px] md:max-w-full rounded-t-2xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-slideUpSpring border border-outline-variant/10 max-h-[100dvh] md:max-h-[85vh]">
+      <div className="bg-surface w-full md:w-[900px] md:max-w-full rounded-t-2xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-slideUpSpring border border-outline-variant/10 max-h-[100dvh] md:max-h-[85vh] pb-[env(safe-area-inset-bottom)] md:pb-0">
         {/* Header */}
         <div className="p-3 md:p-6 pb-2 md:pb-4 border-b border-outline-variant/10 flex items-start justify-between">
           <div>
@@ -233,8 +312,8 @@ export default function GlobalUploadModal() {
         </div>
 
         {/* Global Progress */}
-        <div className="h-1 bg-surface-container w-full">
-          <div className="h-full bg-primary transition-all duration-300" style={{ width: `${percent}%` }}></div>
+        <div className="h-1 bg-surface-container w-full overflow-hidden">
+          <div className="h-full bg-primary transition-transform duration-300 origin-left" style={{ transform: `scaleX(${percent / 100})` }}></div>
         </div>
 
         <div className="flex flex-col md:flex-row h-[calc(100dvh-120px)] md:h-[500px]">
@@ -321,76 +400,7 @@ export default function GlobalUploadModal() {
               )}
             </div>
 
-            <div ref={listRef} className="flex-1 overflow-y-auto px-3 md:px-6 pb-3 md:pb-6">
-              <div
-                style={{
-                  height: `${rowVirtualizer.getTotalSize()}px`,
-                  width: '100%',
-                  position: 'relative',
-                }}
-              >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const item = items[virtualRow.index]
-                  if (!item) return null
-                  return (
-                    <div
-                      key={item.id}
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: `${virtualRow.size}px`,
-                        transform: `translateY(${virtualRow.start}px)`,
-                      }}
-                      className="pb-3"
-                    >
-                      <div className="bg-surface p-3 rounded-xl shadow-sm border border-outline-variant/10 flex items-center gap-3 h-full">
-                        <div className="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center shrink-0 overflow-hidden relative">
-                          {item.previewUrl ? (
-                            <img src={item.previewUrl} className="w-full h-full object-cover" />
-                          ) : (
-                            <FileImage size={20} className="text-on-surface-variant" />
-                          )}
-                          {item.status === 'done' && (
-                            <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                              <div className="bg-white rounded-full">
-                                <CheckCircle size={16} className="text-success" />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-1">
-                            <p className="text-sm font-semibold text-on-surface truncate pr-2">{item.fileName}</p>
-                            {item.status === 'uploading' && <span className="text-xs font-bold text-primary">{item.progress}%</span>}
-                          </div>
-                          {item.status === 'uploading' ? (
-                            <div className="h-1.5 w-full bg-surface-container rounded-full overflow-hidden">
-                              <div className="h-full bg-primary transition-all duration-300" style={{ width: `${item.progress}%` }}></div>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-on-surface-variant font-medium">
-                              {item.status === 'done'
-                                ? 'Completed'
-                                : item.status === 'error'
-                                ? <span className="text-danger flex flex-wrap items-center gap-1 line-clamp-2" title={item.error}><AlertCircle size={12} className="shrink-0" /> {item.error || 'Failed'}</span>
-                                : 'Waiting...'}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              {items.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-on-surface-variant pt-10">
-                  <span className="material-symbols-outlined text-4xl mb-2 opacity-50" data-icon="inbox">inbox</span>
-                  <p className="text-sm font-medium">Danh sách trống</p>
-                </div>
-              )}
-            </div>
+            <UploadList items={items} />
 
             {/* Bottom stats */}
             <div className="p-4 border-t border-outline-variant/10 bg-surface-container-lowest flex justify-between items-center text-xs text-on-surface-variant font-medium z-10">

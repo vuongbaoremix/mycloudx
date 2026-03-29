@@ -22,7 +22,7 @@ export default function GalleryHeader({
   selectionMode, cancelSelection,
 }: GalleryHeaderProps) {
   return (
-    <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-1 md:gap-4 mb-1 md:mb-12">
+    <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 mb-2 md:mb-12 px-4 md:px-0 mt-3 md:mt-0">
       {/* Top row: title + view toggle on mobile, just title on desktop */}
       <div className="flex items-center justify-between md:block">
         <div>
@@ -31,20 +31,20 @@ export default function GalleryHeader({
         </div>
 
         {/* View mode toggle — inline with title on mobile */}
-        <div className="flex items-center gap-2 md:hidden">
-          <div className="flex bg-surface-container rounded-lg p-0.5">
+        <div className="flex items-center gap-3 md:hidden">
+          <div className="flex bg-surface-container-high/60 border border-outline-variant/20 rounded-[2rem] p-1 shadow-inner backdrop-blur-md">
             {viewModes.map(({ mode, icon, title: modeTitle }) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
-                className={`p-1.5 rounded-md flex items-center justify-center transition-colors ${
+                className={`p-1.5 rounded-full flex items-center justify-center transition-all duration-300 ${
                   viewMode === mode
-                    ? 'bg-surface text-primary shadow-sm'
-                    : 'text-on-surface-variant hover:text-on-surface'
+                    ? 'bg-surface text-primary shadow-md scale-100 border border-outline-variant/10'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container scale-95'
                 }`}
                 title={modeTitle}
               >
-                <span className="material-symbols-outlined text-[18px]" data-icon={icon}>{icon}</span>
+                <span className="material-symbols-outlined text-[18px]" data-icon={icon} style={{ fontVariationSettings: viewMode === mode ? "'FILL' 1" : "'FILL' 0" }}>{icon}</span>
               </button>
             ))}
           </div>
@@ -52,7 +52,7 @@ export default function GalleryHeader({
           {selectionMode && (
             <button
               onClick={cancelSelection}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 bg-primary text-white shadow-sm"
+              className="px-4 py-2 rounded-full text-xs font-bold flex items-center gap-1 bg-danger/10 text-danger hover:bg-danger/20 transition-colors shadow-sm active:scale-95"
             >
               <span className="material-symbols-outlined text-[16px]" data-icon="close">close</span>
               Hủy
@@ -63,19 +63,19 @@ export default function GalleryHeader({
 
       {/* Desktop: view mode toggle + cancel selection */}
       <div className="hidden md:flex items-center gap-4">
-        <div className="flex bg-surface-container rounded-lg p-1">
+        <div className="flex bg-surface-container-high/60 border border-outline-variant/20 rounded-full p-1 shadow-inner backdrop-blur-md">
           {viewModes.map(({ mode, icon, title: modeTitle }) => (
             <button
               key={mode}
               onClick={() => setViewMode(mode)}
-              className={`p-2 rounded-md flex items-center justify-center transition-colors ${
+              className={`p-2 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
                 viewMode === mode
-                  ? 'bg-surface text-primary shadow-sm'
-                  : 'text-on-surface-variant hover:text-on-surface'
+                  ? 'bg-surface text-primary shadow-md scale-100 border border-outline-variant/10'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container scale-95'
               }`}
               title={modeTitle}
             >
-              <span className="material-symbols-outlined text-[20px]" data-icon={icon}>{icon}</span>
+              <span className="material-symbols-outlined text-[20px]" data-icon={icon} style={{ fontVariationSettings: viewMode === mode ? "'FILL' 1" : "'FILL' 0" }}>{icon}</span>
             </button>
           ))}
         </div>

@@ -25,7 +25,7 @@ interface MediaItem {
   size?: number
   width?: number
   height?: number
-  thumbnails: { large?: string; medium?: string; small?: string; micro?: string }
+  thumbnails: { web?: string; large?: string; medium?: string; small?: string; micro?: string }
   is_favorite: boolean
   storage_path: string
   created_at: string
@@ -50,6 +50,9 @@ interface LightboxProps {
 
 function getMediaSrc(item: MediaItem) {
   if (item._previewUrl) return item._previewUrl
+  if (item.mime_type.startsWith('image/') && item.thumbnails?.web) {
+    return item.thumbnails.web
+  }
   return `/api/media/serve/${encodeURIComponent(item.storage_path)}`
 }
 
@@ -69,21 +72,25 @@ function ThumbnailStrip({
 }) {
   const stripRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to keep current thumb visible
-  useEffect(() => {
-    if (!stripRef.current) return
-    const thumb = stripRef.current.children[currentIndex] as HTMLElement
-    if (thumb) {
-      thumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
-    }
-  }, [currentIndex])
-
   // Limit visible range for performance (show ±30 around current)
   const visibleRange = useMemo(() => {
     const start = Math.max(0, currentIndex - 30)
     const end = Math.min(media.length, currentIndex + 31)
     return { start, end }
   }, [currentIndex, media.length])
+
+  // Auto-scroll to keep current thumb visible
+  useEffect(() => {
+    if (!stripRef.current) return
+    // DOM children: [spacer?] [thumb0] [thumb1] ... [spacer?]
+    // Calculate the correct child index accounting for the spacer div
+    const spacerOffset = visibleRange.start > 0 ? 1 : 0
+    const thumbIndexInDOM = spacerOffset + (currentIndex - visibleRange.start)
+    const thumb = stripRef.current.children[thumbIndexInDOM] as HTMLElement
+    if (thumb) {
+      thumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }
+  }, [currentIndex, visibleRange.start])
 
   return (
     <div className="absolute bottom-2 md:bottom-4 left-1/2 -translate-x-1/2 z-30 max-w-[90vw] md:max-w-[70vw]">
@@ -127,57 +134,7 @@ function ThumbnailStrip({
   )
 }
 
-// ========== PROGRESSIVE IMAGE (dual-img crossfade: thumbnail stays visible, full-res fades in on top) ==========
-function ProgressiveImage({
-  fastSrc,
-  fullSrc,
-  alt,
-  className,
-  draggable,
-}: {
-  fastSrc: string
-  fullSrc: string
-  alt: string
-  className?: string
-  draggable?: boolean
-}) {
-  const [fullLoaded, setFullLoaded] = useState(false)
-  const prevFullSrc = useRef(fullSrc)
-
-  // Reset loaded state when image changes
-  useEffect(() => {
-    if (fullSrc !== prevFullSrc.current) {
-      setFullLoaded(false)
-      prevFullSrc.current = fullSrc
-    }
-  }, [fullSrc])
-
-  return (
-    <div className="relative inline-flex items-center justify-center">
-      {/* Base: thumbnail (always visible) */}
-      {fastSrc && (
-        <img
-          src={fastSrc}
-          alt={alt}
-          className={className}
-          draggable={draggable}
-        />
-      )}
-      {/* Overlay: full-res with fade-in */}
-      <img
-        src={fullSrc}
-        alt={alt}
-        className={`${className} ${fastSrc ? 'absolute inset-0 w-full h-full' : ''}`}
-        style={{
-          opacity: fastSrc ? (fullLoaded ? 1 : 0) : 1,
-          transition: 'opacity 0.4s ease',
-        }}
-        draggable={draggable}
-        onLoad={() => setFullLoaded(true)}
-      />
-    </div>
-  )
-}
+// ProgressiveImage has been removed as the unified Web 1920px size allows direct rendering without jank.
 
 // ========== MAIN LIGHTBOX ==========
 export default function Lightbox({
@@ -239,12 +196,18 @@ export default function Lightbox({
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown)
-    document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = ''
     }
   }, [handleKeyDown])
+
+  // Prevent layout thrashing on mobile: only lock body scroll once on mount
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [])
 
   // Preload adjacent images
   useEffect(() => {
@@ -252,7 +215,7 @@ export default function Lightbox({
       const idx = currentIndex + offset
       if (idx >= 0 && idx < media.length) {
         const item = media[idx]
-        const src = item.thumbnails?.large || item.thumbnails?.medium || getMediaSrc(item)
+        const src = item.thumbnails?.web || item.thumbnails?.large || getMediaSrc(item)
         if (src) { const img = new Image(); img.src = src }
       }
     })
@@ -260,7 +223,17 @@ export default function Lightbox({
 
   // ====== SWIPE HANDLING (touch-based, manual for max control) ======
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null)
-  const containerWidth = containerRef.current?.offsetWidth || (typeof window !== 'undefined' ? window.innerWidth : 800)
+  // Cache containerWidth in a ref to avoid forced layout reads on every render
+  const containerWidthRef = useRef(typeof window !== 'undefined' ? window.innerWidth : 800)
+  useEffect(() => {
+    const update = () => {
+      containerWidthRef.current = containerRef.current?.offsetWidth || window.innerWidth
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  const containerWidth = containerWidthRef.current
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -447,102 +420,81 @@ export default function Lightbox({
   const hasLocation = !!current.metadata?.location
 
   return (
-    <div className="fixed inset-0 z-[100] flex font-body">
+    <div className="fixed inset-0 z-[100] flex font-body bg-gradient-to-br from-[#0f172a] to-[#020617] transform-gpu">
       {/* Photo Viewer Area */}
       <div
         ref={containerRef}
-        className="flex-1 relative bg-gradient-to-br from-[#0f172a] to-[#020617] overflow-hidden touch-none select-none"
+        className="flex-1 relative overflow-hidden touch-none select-none"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onWheel={handleWheel}
         onMouseDown={handleMouseDragDown}
       >
-        {/* ===== SWIPE CAROUSEL ===== */}
-        {!isZoomed && (
-          <div
-            className="absolute inset-0 flex items-center justify-center"
-            style={{
-              transform: `translateX(${dragOffset}px)`,
-              transition: (isSwiping || isAnimatingRef.current) ? 'none' : 'transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)',
-            }}
-          >
-            {/* Previous image — to the left */}
-            {prev && (
-              <div
-                className="absolute inset-0 flex items-center justify-center"
-                style={{ transform: `translateX(-100%)` }}
-              >
-                <img
-                  src={prev.thumbnails?.large || prev.thumbnails?.medium || getMediaSrc(prev)}
-                  alt={prev.original_name}
-                  className={`object-contain ${sizeClass} pointer-events-none`}
-                  draggable={false}
-                />
-              </div>
-            )}
-
-            {/* Current image — CSS crossfade (no AnimatePresence delay) */}
+        {/* ===== UNIFIED CAROUSEL & ZOOM VIEW ===== */}
+        <div
+          className="absolute inset-0 flex items-center justify-center will-change-transform"
+          style={{
+            transform: `translate3d(${!isZoomed ? dragOffset : 0}px, 0, 0)`,
+            transition: (isSwiping || isAnimatingRef.current) ? 'none' : 'transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)',
+          }}
+        >
+          {/* Previous image — to the left */}
+          {prev && !isZoomed && (
             <div
-              key={current.id}
-              className="flex items-center justify-center w-full h-full"
-              style={{
-                transform: `scaleX(${flip ? -1 : 1}) rotate(${rotation}deg)`,
-                transition: 'transform 0.3s ease',
-              }}
+              className="absolute inset-0 flex items-center justify-center"
+              style={{ transform: `translateX(-100%)` }}
             >
-              {current.mime_type.startsWith('video/') ? (
-                <VideoPlayer
-                  src={`/api/media/serve/${encodeURIComponent(current.storage_path)}`}
-                  poster={current.thumbnails?.large || current.thumbnails?.medium}
-                  className={`drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass}`}
-                />
-              ) : (
-                <ProgressiveImage
-                  key={`img-${current.id}`}
-                  fastSrc={current.thumbnails?.large || current.thumbnails?.medium || ''}
-                  fullSrc={getMediaSrc(current)}
-                  alt={current.original_name}
-                  className={`object-contain drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass} pointer-events-none`}
-                  draggable={false}
-                />
-              )}
+              <img
+                src={prev.thumbnails?.web || prev.thumbnails?.large || getMediaSrc(prev)}
+                alt={prev.original_name}
+                className={`object-contain ${sizeClass} pointer-events-none`}
+                draggable={false}
+              />
             </div>
+          )}
 
-            {/* Next image — to the right */}
-            {next && (
-              <div
-                className="absolute inset-0 flex items-center justify-center"
-                style={{ transform: `translateX(100%)` }}
-              >
-                <img
-                  src={next.thumbnails?.large || next.thumbnails?.medium || getMediaSrc(next)}
-                  alt={next.original_name}
-                  className={`object-contain ${sizeClass} pointer-events-none`}
-                  draggable={false}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ===== ZOOMED VIEW ===== */}
-        {isZoomed && (
+          {/* Current image — unified to handle pan and zoom without re-mounting */}
           <div
-            className="absolute inset-0 flex items-center justify-center"
+            className="flex items-center justify-center w-full h-full will-change-transform transform-gpu"
             style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) scaleX(${flip ? -1 : 1}) rotate(${rotation}deg)`,
-              cursor: 'grab',
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) scaleX(${flip ? -1 : 1}) rotate(${rotation}deg) translateZ(0)`,
+              transition: (isZoomed && !isSwiping) ? 'none' : 'transform 0.3s ease',
+              cursor: isZoomed ? 'grab' : 'auto',
             }}
           >
-            <img
-              src={getMediaSrc(current)}
-              alt={current.original_name}
-              draggable={false}
-              className={`object-contain drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass} pointer-events-none`}
-            />
+            {current.mime_type.startsWith('video/') ? (
+              <VideoPlayer
+                src={`/api/media/serve/${encodeURIComponent(current.storage_path)}`}
+                poster={current.thumbnails?.web || current.thumbnails?.large}
+                className={`drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass}`}
+              />
+            ) : (
+              <img
+                src={getMediaSrc(current)}
+                alt={current.original_name}
+                className={`object-contain drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass} pointer-events-none`}
+                draggable={false}
+                decoding="async"
+              />
+            )}
           </div>
-        )}
+
+          {/* Next image — to the right */}
+          {next && !isZoomed && (
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{ transform: `translateX(100%)` }}
+            >
+              <img
+                src={next.thumbnails?.web || next.thumbnails?.large || getMediaSrc(next)}
+                alt={next.original_name}
+                className={`object-contain ${sizeClass} pointer-events-none`}
+                draggable={false}
+              />
+            </div>
+          )}
+        </div>
 
         {/* ===== TOP UI ===== */}
         {/* Counter */}
@@ -590,10 +542,33 @@ export default function Lightbox({
             <FlipHorizontal size={20} />
           </button>
           <div className="w-px h-6 bg-white/20 mx-1"></div>
-          <a href={`/api/media/${current.id}/download`} download
-            className="p-2 text-white/80 hover:text-white transition-colors">
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              const auth_token = typeof window !== 'undefined' ? localStorage.getItem('mycloud_token') : null;
+              if (!auth_token) return;
+              try {
+                const res = await fetch('/api/auth/download-token', {
+                  headers: { 'Authorization': `Bearer ${auth_token}` }
+                });
+                if (!res.ok) throw new Error('Failed to get download token');
+                const data = await res.json();
+                
+                const link = document.createElement('a');
+                link.href = `/api/media/${current.id}/download?token=${data.token}`;
+                link.download = current.original_name;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              } catch (err) {
+                console.error("Download failed", err);
+                alert("Không thể tải xuống. Vui lòng thử lại.");
+              }
+            }}
+            className="p-2 text-white/80 hover:text-white transition-colors"
+          >
             <Download size={20} />
-          </a>
+          </button>
           <button className="p-2 transition-colors ml-1" onClick={() => onFavorite(current.id)}>
             <Heart size={20} fill={current.is_favorite ? '#f59e0b' : 'none'} color={current.is_favorite ? '#f59e0b' : 'white'} />
           </button>
@@ -647,7 +622,7 @@ export default function Lightbox({
               {/* Photo preview */}
               <div className="w-full bg-black flex items-center justify-center" style={{ maxHeight: '45vh' }}>
                 <img
-                  src={current.thumbnails?.large || current.thumbnails?.medium || getMediaSrc(current)}
+                  src={current.thumbnails?.web || current.thumbnails?.large || getMediaSrc(current)}
                   alt={current.original_name}
                   className="w-full object-contain"
                   style={{ maxHeight: '45vh' }}

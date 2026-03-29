@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import api from '../api/client'
 import { SkeletonAdmin } from '../components/ui/Skeleton'
+import { useConfirm } from '../contexts/ConfirmContext'
 
 export default function Admin() {
   const [stats, setStats] = useState<any>(null)
@@ -25,15 +26,26 @@ export default function Admin() {
     return `${(bytes / 1073741824).toFixed(1)} GB`
   }
 
+  const { confirm } = useConfirm()
+
   const handleResetPassword = async (userId: string, userName: string) => {
-    if (!confirm(`Reset mật khẩu cho ${userName}?`)) return
+    if (!await confirm({
+      title: 'Reset mật khẩu',
+      message: `Bạn có muốn cấp lại mật khẩu cho user ${userName}?`,
+      confirmText: 'Reset'
+    })) return
     const result = await api.resetUserPassword(userId)
     setMessage(`Mật khẩu mới cho ${userName}: ${result.new_password}`)
     setTimeout(() => setMessage(''), 10000)
   }
 
   const handleDeleteUser = async (userId: string, userName: string) => {
-    if (!confirm(`Xóa user ${userName}? Hành động này không thể hoàn tác!`)) return
+    if (!await confirm({
+      title: 'Xóa người dùng',
+      message: `Toàn bộ dữ liệu của ${userName} sẽ bị xóa vĩnh viễn và không thể khôi phục. Bạn có chắc chắn?`,
+      confirmText: 'Xóa Vĩnh Viễn',
+      isDestructive: true
+    })) return
     await api.deleteUser(userId)
     setUsers((prev) => prev.filter((u) => u.id !== userId))
   }

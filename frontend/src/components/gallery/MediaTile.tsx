@@ -66,7 +66,7 @@ const MediaTile = React.memo(function MediaTile({
   return (
     <div
       data-media-id={item.id}
-      className={`${colSpan} relative group ${isTimelineHero ? 'rounded-lg md:rounded-2xl timeline-hero-parallax' : 'rounded-none md:rounded-xl'} overflow-hidden cursor-pointer bg-surface-container-high shadow-none md:shadow-xl md:shadow-on-surface/5 transition-all ${isTimeline ? 'timeline-tile timeline-tile-glow' : ''} ${selectionMode && isSelected ? 'ring-2 md:ring-4 ring-primary ring-inset scale-[0.98]' : ''}`}
+      className={`${colSpan} relative group ${isTimelineHero ? 'rounded-none md:rounded-2xl timeline-hero-parallax' : 'rounded-none md:rounded-xl'} overflow-hidden cursor-pointer bg-surface-container-high shadow-none md:shadow-xl md:shadow-on-surface/5 transition-all ${isTimeline ? 'timeline-tile timeline-tile-glow' : ''} ${selectionMode && isSelected ? 'ring-2 md:ring-4 ring-primary ring-inset scale-[0.98]' : ''}`}
       onClick={onItemClick}
       onTouchStart={(e) => onTouchStart(item.id, e)}
       onTouchMove={(e) => onTouchMove(e)}

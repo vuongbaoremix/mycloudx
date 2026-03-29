@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import BottomNav from './BottomNav'
 import GlobalUploadModal from '../upload/GlobalUploadModal'
 
 export default function Layout() {
@@ -13,7 +14,8 @@ export default function Layout() {
     <div className="flex min-h-screen bg-surface">
       <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
       <Header onMenuClick={() => setIsMobileMenuOpen(true)} />
-      <main className="ml-0 md:ml-64 pt-12 md:pt-16 w-full min-h-screen transition-all duration-300">
+      {/* Nội dung chính luôn có padding đệm trên (Header) và đệm dưới (BottomNav mobile) */}
+      <main className="flex-1 w-full mx-auto pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 pt-[calc(3rem+env(safe-area-inset-top))] md:pt-[calc(4rem+env(safe-area-inset-top))] px-0 md:pl-64 min-h-screen transition-all duration-300">
         <AnimatePresence mode="wait">
           <motion.div
             key={location.pathname}
@@ -28,6 +30,7 @@ export default function Layout() {
         </AnimatePresence>
       </main>
 
+      <BottomNav />
       <GlobalUploadModal />
     </div>
   )

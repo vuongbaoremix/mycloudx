@@ -144,7 +144,7 @@ export default function Dashboard() {
           <h3 className="text-sm font-semibold text-on-surface-variant uppercase tracking-wider mb-4 mt-8 flex items-center gap-2">
             <Server size={16} /> Phần cứng máy chủ
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <div className="card">
               <div className="text-sm text-on-surface-variant uppercase tracking-wider mb-2 font-semibold">CPU</div>
               <div className="text-3xl font-bold text-sky-400 mb-1">{system.cpu_usage_percent.toFixed(1)}%</div>
@@ -175,7 +175,7 @@ export default function Dashboard() {
           <h3 className="text-sm font-semibold text-on-surface-variant uppercase tracking-wider mb-4 mt-8 flex items-center gap-2">
             <Activity size={16} /> Hàng đợi xử lý
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <div className="card border-blue-500/20 bg-blue-500/5">
               <div className="text-sm text-blue-400/80 uppercase tracking-wider mb-2 font-semibold">Đang chờ</div>
               <div className="text-3xl font-bold text-blue-400 mb-1">{system.jobs_pending || 0}</div>

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Trash2, Images } from 'lucide-react'
 import api from '../api/client'
 import { SkeletonAlbumGrid } from '../components/ui/Skeleton'
+import { useConfirm } from '../contexts/ConfirmContext'
 
 export default function Albums() {
   const navigate = useNavigate()
@@ -28,9 +29,16 @@ export default function Albums() {
     setShowCreate(false)
   }
 
+  const { confirm } = useConfirm()
+
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm('Xóa album này?')) return
+    if (!await confirm({
+      title: 'Xóa Album',
+      message: 'Bạn có chắc chắn muốn xóa album này? Việc này không xóa ảnh gốc trong thư viện.',
+      confirmText: 'Xóa',
+      isDestructive: true
+    })) return
     await api.deleteAlbum(id)
     setAlbums((prev) => prev.filter((a) => a.id !== id))
   }

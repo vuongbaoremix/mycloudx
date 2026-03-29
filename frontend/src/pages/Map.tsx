@@ -8,6 +8,7 @@ import { SkeletonMap } from '../components/ui/Skeleton'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import MarkerClusterGroup from 'react-leaflet-cluster'
 
 // Fix default marker icon (Leaflet + bundlers issue)
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -183,49 +184,51 @@ export default function MapPage() {
 
           <FitBounds items={media} />
 
-          {media.map((item) => {
-            if (!item.metadata?.location) return null
-            const { lat, lng } = item.metadata.location
-            return (
-              <Marker
-                key={item.id}
-                position={[lat, lng]}
-                icon={createCustomIcon(item.is_favorite)}
-                eventHandlers={{
-                  click: () => handleMarkerClick(item),
-                }}
-              >
-                <Popup className="rounded-xl overflow-hidden shadow-lg border-none" closeButton={false}>
-                  <div className="flex flex-col w-48 bg-surface rounded-xl overflow-hidden">
-                    <div className="h-32 w-full bg-surface-container-high relative">
-                      {item.thumbnails.small || item.thumbnails.micro ? (
-                        <img
-                          src={item.thumbnails.small || item.thumbnails.micro}
-                          alt={item.original_name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-on-surface-variant">
-                          <span className="material-symbols-outlined text-[32px]">image</span>
-                        </div>
-                      )}
+          <MarkerClusterGroup chunkedLoading maxClusterRadius={60}>
+            {media.map((item) => {
+              if (!item.metadata?.location) return null
+              const { lat, lng } = item.metadata.location
+              return (
+                <Marker
+                  key={item.id}
+                  position={[lat, lng]}
+                  icon={createCustomIcon(item.is_favorite)}
+                  eventHandlers={{
+                    click: () => handleMarkerClick(item),
+                  }}
+                >
+                  <Popup className="rounded-xl overflow-hidden shadow-lg border-none" closeButton={false}>
+                    <div className="flex flex-col w-48 bg-surface rounded-xl overflow-hidden">
+                      <div className="h-32 w-full bg-surface-container-high relative">
+                        {item.thumbnails.small || item.thumbnails.micro ? (
+                          <img
+                            src={item.thumbnails.small || item.thumbnails.micro}
+                            alt={item.original_name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-on-surface-variant">
+                            <span className="material-symbols-outlined text-[32px]">image</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3">
+                        <p className="font-bold text-sm text-on-surface truncate" title={item.original_name}>{item.original_name}</p>
+                        <p className="text-xs text-on-surface-variant mt-0.5">{formatDate(item.created_at)}</p>
+                      </div>
                     </div>
-                    <div className="p-3">
-                      <p className="font-bold text-sm text-on-surface truncate" title={item.original_name}>{item.original_name}</p>
-                      <p className="text-xs text-on-surface-variant mt-0.5">{formatDate(item.created_at)}</p>
-                    </div>
-                  </div>
-                </Popup>
-              </Marker>
-            )
-          })}
+                  </Popup>
+                </Marker>
+              )
+            })}
+          </MarkerClusterGroup>
         </MapContainer>
         </div>
 
-        {/* Side panel for selected item */}
+        {/* Side panel for selected item (Bottom sheet on mobile) */}
         {selectedMedia && (
-          <div className="w-80 h-full bg-surface-container-lowest border-l border-white/10 dark:border-border flex flex-col z-20 overflow-y-auto animate-slideLeft">
-            <div className="flex items-center justify-between p-4 border-b border-border/40 sticky top-0 bg-surface-container-lowest z-10">
+          <div className="absolute inset-x-0 bottom-0 md:relative w-full md:w-80 h-[55vh] md:h-full bg-surface-container-lowest border-t md:border-t-0 md:border-l border-white/10 dark:border-border flex flex-col z-[400] md:z-20 overflow-y-auto animate-slideUpSpring md:animate-slideLeft rounded-t-3xl md:rounded-none pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 shadow-[0_-10px_40px_rgba(0,0,0,0.3)] md:shadow-none">
+            <div className="flex items-center justify-between p-4 border-b border-border/40 sticky top-0 bg-surface-container-lowest z-10 rounded-t-3xl md:rounded-none">
               <span className="font-extrabold text-base text-on-surface">Chi tiết điểm chụp</span>
               <button className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors" onClick={() => setSelectedMedia(null)}>
                 <X size={18} />

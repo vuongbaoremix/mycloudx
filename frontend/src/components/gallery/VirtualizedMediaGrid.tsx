@@ -139,7 +139,7 @@ export default function VirtualizedMediaGrid({
   // Compute the gap in pixels
   const gapPx = useMemo(() => {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-    if (isMobile) return 1
+    if (isMobile) return 2
     if (viewMode === 'timeline') return 12
     if (viewMode === 'grid-large') return 24
     if (viewMode === 'grid-medium') return 16
@@ -152,7 +152,7 @@ export default function VirtualizedMediaGrid({
     if (!row) return 200
 
     if (row.type === 'header' || row.type === 'skeleton-header') {
-      return typeof window !== 'undefined' && window.innerWidth < 768 ? 36 : 52
+      return typeof window !== 'undefined' && window.innerWidth < 768 ? 52 : 68
     }
 
     const width = containerWidth || 800
@@ -166,6 +166,10 @@ export default function VirtualizedMediaGrid({
 
     if (viewMode === 'timeline' && row.type === 'media-row' && row.startIdx === 0) {
       const heroHeight = isMobile ? width * 0.67 : width / 2
+      if (isMobile && row.items.length > 1) {
+        // Hero takes full width, remaining items wrap to next line taking width/2
+        return heroHeight + gapPx + (width / 2) + gapPx
+      }
       return heroHeight + gapPx
     }
 
@@ -206,10 +210,10 @@ export default function VirtualizedMediaGrid({
     return () => observer.disconnect()
   }, [hasMore, onLoadMore])
 
-  const gridGap = viewMode === 'timeline' ? 'gap-px md:gap-3'
-    : viewMode === 'grid-large' ? 'gap-px md:gap-6'
-      : viewMode === 'grid-medium' ? 'gap-px md:gap-4'
-        : 'gap-px md:gap-2'
+  const gridGap = viewMode === 'timeline' ? 'gap-[2px] md:gap-3'
+    : viewMode === 'grid-large' ? 'gap-[2px] md:gap-6'
+      : viewMode === 'grid-medium' ? 'gap-[2px] md:gap-4'
+        : 'gap-[2px] md:gap-2'
 
   // ─── Floating sticky header logic (window scroll) ───
   const headerIndices = useMemo(() =>
@@ -225,7 +229,7 @@ export default function VirtualizedMediaGrid({
     const containerTop = containerRef.current?.offsetTop ?? 0
     const headerOffset = typeof window !== 'undefined' && window.innerWidth < 768 ? 48 : 64
     const scrollTop = window.scrollY - containerTop + headerOffset
-    const headerHeight = typeof window !== 'undefined' && window.innerWidth < 768 ? 36 : 52
+    const headerHeight = typeof window !== 'undefined' && window.innerWidth < 768 ? 52 : 68
 
     let activeIdx = -1
     for (let i = headerIndices.length - 1; i >= 0; i--) {
@@ -267,14 +271,13 @@ export default function VirtualizedMediaGrid({
             position: 'fixed',
             top: typeof window !== 'undefined' && window.innerWidth < 768 ? 48 : 64,
             left: containerRef.current?.getBoundingClientRect().left ?? 0,
-            right: 0,
+            width: containerRef.current?.getBoundingClientRect().width ?? '100%',
             zIndex: 20,
             transform: `translateY(${stickyHeader.translateY}px)`,
-            pointerEvents: 'auto',
-            padding: "0 10px"
+            pointerEvents: 'auto'
           }}
         >
-          <div className={`flex items-center gap-2 md:gap-4 py-2 md:py-3 px-2 md:px-0 bg-surface/95 backdrop-blur-sm border-b border-outline-variant/20 shadow-sm ${viewMode === 'timeline' ? 'timeline-dot' + (stickyHeader.row.sectionIdx === 0 ? ' timeline-dot-active' : '') : ''}`}>
+          <div className={`flex items-center gap-2 md:gap-4 py-3 md:py-4 px-4 md:px-0 bg-surface/98 backdrop-blur-xl border-b border-outline-variant/30 shadow-sm ${viewMode === 'timeline' ? 'timeline-dot' + (stickyHeader.row.sectionIdx === 0 ? ' timeline-dot-active' : '') : ''}`}>
             {viewMode === 'timeline' && (
               <span className="material-symbols-outlined text-primary text-[14px] md:text-[20px]" data-icon="calendar_today">calendar_today</span>
             )}
@@ -325,7 +328,7 @@ export default function VirtualizedMediaGrid({
                   transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 }}
               >
-                <div className={`flex items-center gap-2 md:gap-4 py-2 md:py-3 ${viewMode === 'timeline' ? 'timeline-dot' + (row.sectionIdx === 0 ? ' timeline-dot-active' : '') : ''}`}>
+                <div className={`flex items-center gap-2 md:gap-4 py-3 md:py-4 px-4 md:px-0 bg-surface/90 backdrop-blur-md border-b-0 border-outline-variant/10 ${viewMode === 'timeline' ? 'timeline-dot' + (row.sectionIdx === 0 ? ' timeline-dot-active' : '') : ''}`}>
                   {viewMode === 'timeline' && (
                     <span className="material-symbols-outlined text-primary text-[14px] md:text-[20px]" data-icon="calendar_today">calendar_today</span>
                   )}
@@ -410,7 +413,7 @@ export default function VirtualizedMediaGrid({
                   transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 }}
               >
-                <div className="flex items-center gap-2 md:gap-4 mb-1.5 md:mb-4 mt-3 md:mt-16">
+                <div className="flex items-center gap-2 md:gap-4 mb-2 md:mb-4 mt-4 md:mt-16 px-4 md:px-0">
                   <div className="skeleton-shimmer h-4 md:h-7 w-28 md:w-44 rounded-lg bg-surface-container"></div>
                   <div className="h-px flex-1 bg-surface-container"></div>
                   <div className="skeleton-shimmer h-4 md:h-6 w-16 md:w-20 rounded-full bg-surface-container"></div>
@@ -433,7 +436,7 @@ export default function VirtualizedMediaGrid({
                   transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 }}
               >
-                <div className={`grid grid-cols-12 gap-px md:gap-3`}>
+                <div className={`grid grid-cols-12 gap-[2px] md:gap-3`}>
                   {Array.from({ length: row.count }).map((_, i) => (
                     <div key={`skel-${i}`} className="col-span-4 md:col-span-4 lg:col-span-3 aspect-square rounded-none md:rounded-xl overflow-hidden">
                       <div className="skeleton-shimmer w-full h-full bg-surface-container"></div>

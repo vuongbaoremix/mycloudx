@@ -3,6 +3,7 @@ import { Link2, Trash2, Copy, Clock, Eye, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import api from '../api/client'
 import { SkeletonSharedLinks } from '../components/ui/Skeleton'
+import { useConfirm } from '../contexts/ConfirmContext'
 
 export default function SharedLinks() {
   const [shares, setShares] = useState<any[]>([])
@@ -16,8 +17,15 @@ export default function SharedLinks() {
     }).catch(() => setLoading(false))
   }, [])
 
+  const { confirm } = useConfirm()
+
   const handleDelete = async (id: string) => {
-    if (!confirm('Xóa liên kết chia sẻ này?')) return
+    if (!await confirm({
+      title: 'Xóa Liên kết Chia sẻ',
+      message: 'Những người đang có liên kết này sẽ không thể truy cập nội dung được nữa. Vẫn xóa?',
+      confirmText: 'Xóa',
+      isDestructive: true
+    })) return
     try {
       await api.deleteShare(id)
       setShares((prev) => prev.filter((s) => s.id !== id))
