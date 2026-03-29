@@ -143,10 +143,10 @@ impl StorageProvider for CloudStoreProvider {
         };
 
         let thumb_path = if parent_dir.ends_with(name_no_ext) {
-            format!("{}/{}.jpg", parent_dir, size.as_str())
+            format!("{}/{}.webp", parent_dir, size.as_str())
         } else {
             let user_id = parts.first().unwrap_or(&"unknown");
-            format!("{}/.thumbnails/{}/{}.jpg", user_id, size.as_str(), name_no_ext)
+            format!("{}/.thumbnails/{}/{}.webp", user_id, size.as_str(), name_no_ext)
         };
 
         self.upload(buffer, &thumb_path).await?;
@@ -168,10 +168,10 @@ impl StorageProvider for CloudStoreProvider {
         };
 
         let thumb_path = if parent_dir.ends_with(name_no_ext) {
-            format!("{}/{}.jpg", parent_dir, size.as_str())
+            format!("{}/{}.webp", parent_dir, size.as_str())
         } else {
             let user_id = parts.first().unwrap_or(&"unknown");
-            format!("{}/.thumbnails/{}/{}.jpg", user_id, size.as_str(), name_no_ext)
+            format!("{}/.thumbnails/{}/{}.webp", user_id, size.as_str(), name_no_ext)
         };
         self.get_url(&thumb_path)
     }

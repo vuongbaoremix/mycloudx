@@ -7,11 +7,31 @@ use axum::{
 
 use super::jwt::{verify_token, Claims};
 
-/// Extract claims from Authorization header. Returns None if no token.
+/// Extract claims from Authorization header or 'token' query parameter. Returns None if no token.
 pub fn extract_claims(req: &Request, jwt_secret: &str) -> Option<Claims> {
-    let auth_header = req.headers().get("authorization")?.to_str().ok()?;
-    let token = auth_header.strip_prefix("Bearer ")?;
-    verify_token(token, jwt_secret).ok()
+    // 1. Try Authorization header
+    if let Some(auth_header) = req.headers().get("authorization").and_then(|h| h.to_str().ok()) {
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
+            if let Ok(claims) = verify_token(token, jwt_secret) {
+                return Some(claims);
+            }
+        }
+    }
+
+    // 2. Try 'token' query parameter (used for direct file downloads via <a> tags)
+    if let Some(query) = req.uri().query() {
+        for pair in query.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                if k == "token" {
+                    if let Ok(claims) = verify_token(v, jwt_secret) {
+                        return Some(claims);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Middleware: requires valid JWT token

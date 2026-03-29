@@ -1,4 +1,4 @@
-﻿mod auth;
+mod auth;
 mod config;
 mod db;
 mod error;
@@ -7,6 +7,7 @@ mod metrics;
 mod models;
 mod routes;
 mod storage;
+mod jobs;
 
 use std::future::Future;
 use std::sync::Arc;
@@ -120,6 +121,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize metrics
     let app_metrics = metrics::AppMetrics::new();
+    
+    // Start persistent SQLite job queue worker
+    jobs::start_worker(db.clone());
 
     // Start background processing workers.
     // Workers are I/O-bound (waiting on CloudStore/Google Drive HTTP uploads),
@@ -176,6 +180,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/user/profile", get(routes::user::get_profile))
         .route("/user/profile", put(routes::user::update_profile))
         .route("/user/password", put(routes::user::change_password))
+        // Auth
+        .route("/auth/download-token", get(routes::auth::get_download_token))
         // Albums
         .route("/albums", get(routes::album::list_albums))
         .route("/albums", post(routes::album::create_album))
@@ -213,19 +219,28 @@ async fn main() -> anyhow::Result<()> {
 
     let api_routes = Router::new().merge(public_routes).merge(protected_routes);
 
-    let app = Router::new()
-        .nest("/api", api_routes)
-        .fallback(serve_frontend)
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
+    let frontend_dir = std::env::var("FRONTEND_DIR").unwrap_or_default();
+    let app = if !frontend_dir.is_empty() && std::path::Path::new(&frontend_dir).exists() {
+        tracing::info!("Serving frontend from directory: {}", frontend_dir);
+        Router::new().nest("/api", api_routes).fallback_service(
+            tower_http::services::ServeDir::new(&frontend_dir).not_found_service(
+                tower_http::services::ServeFile::new(format!("{}/index.html", frontend_dir)),
+            ),
         )
-        .layer(tower_http::compression::CompressionLayer::new())
-        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024)) // 1 GB body limit
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+    } else {
+        tracing::info!("Serving embedded frontend");
+        Router::new().nest("/api", api_routes).fallback(serve_frontend)
+    }
+    .layer(
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any),
+    )
+    .layer(tower_http::compression::CompressionLayer::new())
+    .layer(DefaultBodyLimit::max(1024 * 1024 * 1024)) // 1 GB body limit
+    .layer(TraceLayer::new_for_http())
+    .with_state(state);
 
     // Start server
     let addr = format!("{}:{}", config.host, config.port);

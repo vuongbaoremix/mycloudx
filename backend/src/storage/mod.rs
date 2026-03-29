@@ -10,6 +10,7 @@ pub enum ThumbnailSize {
     Small,
     Medium,
     Large,
+    Web,
 }
 
 impl ThumbnailSize {
@@ -19,6 +20,7 @@ impl ThumbnailSize {
             ThumbnailSize::Small => "small",
             ThumbnailSize::Medium => "medium",
             ThumbnailSize::Large => "large",
+            ThumbnailSize::Web => "web",
         }
     }
 
@@ -28,6 +30,7 @@ impl ThumbnailSize {
             ThumbnailSize::Small => 150,
             ThumbnailSize::Medium => 400,
             ThumbnailSize::Large => 800,
+            ThumbnailSize::Web => 1920,
         }
     }
 }

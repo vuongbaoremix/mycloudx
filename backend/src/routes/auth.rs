@@ -108,3 +108,19 @@ pub async fn register(
         user: UserResponse::from_user(&user),
     }))
 }
+
+#[derive(Serialize)]
+pub struct DownloadTokenResponse {
+    pub token: String,
+}
+
+/// GET /api/auth/download-token
+pub async fn get_download_token(
+    State(state): State<AppState>,
+    claims: crate::auth::jwt::Claims,
+) -> Result<Json<DownloadTokenResponse>, StatusCode> {
+    let token = crate::auth::jwt::create_download_token(&claims.sub, &state.config.jwt_secret)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(DownloadTokenResponse { token }))
+}

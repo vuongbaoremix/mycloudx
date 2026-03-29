@@ -126,6 +126,10 @@ fn parse_gps_coord(
             let seconds = rationals[2].to_f64();
             let mut coord = degrees + minutes / 60.0 + seconds / 3600.0;
 
+            if coord.is_nan() {
+                return None;
+            }
+
             // Check reference (N/S or E/W)
             if let Some(ref_field) = reader.get_field(ref_tag, exif::In::PRIMARY) {
                 let ref_val = ref_field.display_value().to_string();

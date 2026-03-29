@@ -18,6 +18,7 @@ pub struct ProcessJob {
     pub storage_path: String,
     pub mime_type: String,
     pub video_thumb_path: Option<PathBuf>,
+    pub orientation: Option<i32>,
 }
 
 /// A handle to the processing queue.
@@ -154,8 +155,9 @@ async fn process_job(
                 let st = storage.clone();
                 let p = job.storage_path.clone();
                 let id = job.record_id.clone();
+                let ori = job.orientation;
                 async move {
-                    let r = thumbnail::generate_thumbnails(d, p, st).await;
+                    let r = thumbnail::generate_thumbnails(d, p, st, ori).await;
                     tracing::info!("Worker job {}: thumbnails done in {:?}", id, t_thumb.elapsed());
                     r
                 }
@@ -184,7 +186,7 @@ async fn process_job(
                                 r
                             }
                         },
-                        thumbnail::generate_thumbnails(thumb_data, job.storage_path.clone(), storage.clone())
+                        thumbnail::generate_thumbnails(thumb_data, job.storage_path.clone(), storage.clone(), None)
                     );
 
                     upload_res?;
@@ -242,6 +244,7 @@ async fn update_media_with_thumbnails(
         "small": thumb.small,
         "medium": thumb.medium,
         "large": thumb.large,
+        "web": thumb.web,
     }))?;
 
     sqlx::query(

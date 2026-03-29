@@ -32,6 +32,7 @@ pub struct MediaThumbnails {
     pub small: Option<String>,
     pub medium: Option<String>,
     pub large: Option<String>,
+    pub web: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,8 +47,8 @@ pub struct MediaMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoLocation {
-    pub lat: f64,
-    pub lng: f64,
+    pub lat: Option<f64>,
+    pub lng: Option<f64>,
 }
 
 /// Response DTO for media listing
@@ -84,6 +85,7 @@ impl MediaResponse {
             small: Self::to_serve_url(&media.thumbnails.0.small),
             medium: Self::to_serve_url(&media.thumbnails.0.medium),
             large: Self::to_serve_url(&media.thumbnails.0.large),
+            web: Self::to_serve_url(&media.thumbnails.0.web),
         };
 
         Self {

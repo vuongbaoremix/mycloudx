@@ -10,30 +10,33 @@ pub struct ThumbnailResult {
     pub small: String,
     pub medium: String,
     pub large: String,
+    pub web: String,
     pub blur_hash: String,
     pub width: u32,
     pub height: u32,
     pub aspect_ratio: f64,
 }
 
-const SIZES: [(ThumbnailSize, u32); 4] = [
+const SIZES: [(ThumbnailSize, u32); 5] = [
+    (ThumbnailSize::Web, 1920),
     (ThumbnailSize::Large, 800),
     (ThumbnailSize::Medium, 400),
     (ThumbnailSize::Small, 150),
     (ThumbnailSize::Micro, 50),
 ];
 
-/// Generate 4-tier JPEG thumbnails and a BlurHash for an image buffer.
+/// Generate 5-tier WebP thumbnails and a BlurHash for an image buffer.
 ///
 /// Performance stack:
 /// - Decode:  zune-jpeg (SIMD, pure Rust, ~3-4x faster than image crate)
 /// - Resize:  fast_image_resize (SIMD Bilinear)
-/// - Encode:  mozjpeg (libjpeg-turbo, ~3-5x faster than image crate)
+/// - Encode:  webp encoder (efficient WebP compression)
 /// - Upload:  parallel via tokio::try_join!
 pub async fn generate_thumbnails(
     data: bytes::Bytes,
     storage_path: String,
     storage: Arc<dyn StorageProvider>,
+    orientation: Option<i32>,
 ) -> Result<ThumbnailResult> {
     let t_start = std::time::Instant::now();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(ThumbnailSize, Vec<u8>)>();
@@ -43,7 +46,7 @@ pub async fn generate_thumbnails(
         let t_cpu = std::time::Instant::now();
         // ── DECODE ────────────────────────────────────────────────────────
         // Try zune-jpeg (fast SIMD) first; fall back to `image` for non-JPEG
-        let (rgba_pixels, orig_width, orig_height): (Vec<u8>, u32, u32) =
+        let (mut rgba_pixels, mut orig_width, mut orig_height): (Vec<u8>, u32, u32) =
             if is_jpeg(data.as_ref()) {
                 let mut decoder = zune_jpeg::JpegDecoder::new(data.as_ref());
                 // Force RGBA output so fast_image_resize can use U8x4 directly
@@ -61,6 +64,35 @@ pub async fn generate_thumbnails(
                 let rgba = img.into_rgba8();
                 (rgba.into_raw(), w, h)
             };
+
+        // ── APPLY ORIENTATION ─────────────────────────────────────────────
+        if let Some(ori) = orientation {
+            if ori > 1 && ori <= 8 {
+                if let Some(img) = image::RgbaImage::from_vec(orig_width, orig_height, rgba_pixels) {
+                    let rotated = match ori {
+                        2 => image::imageops::flip_horizontal(&img),
+                        3 => image::imageops::rotate180(&img),
+                        4 => image::imageops::flip_vertical(&img),
+                        5 => {
+                            let flipped = image::imageops::flip_horizontal(&img);
+                            image::imageops::rotate270(&flipped)
+                        }
+                        6 => image::imageops::rotate90(&img),
+                        7 => {
+                            let flipped = image::imageops::flip_horizontal(&img);
+                            image::imageops::rotate90(&flipped)
+                        }
+                        8 => image::imageops::rotate270(&img),
+                        _ => img,
+                    };
+                    orig_width = rotated.width();
+                    orig_height = rotated.height();
+                    rgba_pixels = rotated.into_raw();
+                } else {
+                    return Err(anyhow::anyhow!("Failed to convert pixel buffer for orientation rotation"));
+                }
+            }
+        }
 
         let aspect_ratio = orig_width as f64 / orig_height.max(1) as f64;
 
@@ -81,9 +113,9 @@ pub async fn generate_thumbnails(
                 resize_rgba(&mut resizer, &mut current_pixels, current_w, current_h, new_w, new_h)?
             };
 
-            let jpeg = encode_mozjpeg(&resized, new_w, new_h, *size)?;
+            let web_p = encode_webp(&resized, new_w, new_h, *size)?;
             // Send to async upload task immediately
-            let _ = tx.send((*size, jpeg));
+            let _ = tx.send((*size, web_p));
 
             current_pixels = resized;
             current_w = new_w;
@@ -102,11 +134,11 @@ pub async fn generate_thumbnails(
     let mut join_set = tokio::task::JoinSet::new();
 
     // Receive thumbnails as they are generated and spawn upload tasks
-    while let Some((size, jpeg_data)) = rx.recv().await {
+    while let Some((size, webp_data)) = rx.recv().await {
         let st = storage.clone();
         let path = storage_path.clone();
         join_set.spawn(async move {
-            let res_path = st.upload_thumbnail(&jpeg_data, &path, size).await?;
+            let res_path = st.upload_thumbnail(&webp_data, &path, size).await?;
             Ok::<_, anyhow::Error>((size, res_path))
         });
     }
@@ -114,6 +146,7 @@ pub async fn generate_thumbnails(
     // Ensure the blocking task didn't error
     let (blur_hash, width, height, aspect_ratio) = blocking_handle.await??;
 
+    let mut web_res = String::new();
     let mut large_res = String::new();
     let mut medium_res = String::new();
     let mut small_res = String::new();
@@ -124,6 +157,7 @@ pub async fn generate_thumbnails(
     while let Some(res) = join_set.join_next().await {
         let (size, path) = res??;
         match size {
+            ThumbnailSize::Web => web_res = path,
             ThumbnailSize::Large => large_res = path,
             ThumbnailSize::Medium => medium_res = path,
             ThumbnailSize::Small => small_res = path,
@@ -133,6 +167,7 @@ pub async fn generate_thumbnails(
     tracing::info!("All async pipelined uploads finished in {:?} (from start: {:?})", t_uploads.elapsed(), t_start.elapsed());
 
     Ok(ThumbnailResult {
+        web: web_res,
         large: large_res,
         medium: medium_res,
         small: small_res,
@@ -195,26 +230,18 @@ fn resize_rgba(
     Ok(dst.into_vec())
 }
 
-/// Encode RGBA8 pixels to JPEG using mozjpeg (libjpeg-turbo, SIMD).
-fn encode_mozjpeg(pixels: &[u8], w: u32, h: u32, size: ThumbnailSize) -> Result<Vec<u8>> {
+/// Encode RGBA8 pixels to WebP.
+fn encode_webp(pixels: &[u8], w: u32, h: u32, size: ThumbnailSize) -> Result<Vec<u8>> {
     let quality = match size {
         ThumbnailSize::Micro => 60.0,
         ThumbnailSize::Small => 72.0,
-        _ => 82.0,
+        _ => 82.0, // Used for Medium, Large, Web
     };
 
-    let est_capacity = (w * h / 10).max(1024) as usize; // Pre-allocate estimation
+    let encoder = webp::Encoder::from_rgba(pixels, w, h);
+    let webp_memory = encoder.encode(quality);
 
-    let mut comp = mozjpeg::Compress::new(mozjpeg::ColorSpace::JCS_EXT_RGBA);
-    comp.set_size(w as usize, h as usize);
-    comp.set_quality(quality);
-    comp.set_color_space(mozjpeg::ColorSpace::JCS_YCbCr);
-    comp.set_optimize_coding(false); // Faster encode (slightly larger file)
-
-    let mut comp = comp.start_compress(Vec::with_capacity(est_capacity))?;
-    comp.write_scanlines(pixels)?;
-    let data = comp.finish()?;
-    Ok(data)
+    Ok(webp_memory.to_vec())
 }
 
 /// Generate BlurHash from tiny RGBA pixels.

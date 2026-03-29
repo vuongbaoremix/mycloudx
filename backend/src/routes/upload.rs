@@ -244,6 +244,7 @@ async fn finalize_upload(
     let mut height: Option<i32> = None;
     let mut aspect_ratio = 1.0_f64;
     let mut metadata_json: serde_json::Value = serde_json::Value::Null;
+    let mut orientation: Option<i32> = None;
 
     if mime_type.starts_with("image/") {
         if let Ok(exif_bytes) = tokio::fs::read(&temp_path).await {
@@ -253,6 +254,7 @@ async fn finalize_upload(
                 if meta.height > 0 {
                     aspect_ratio = meta.width as f64 / meta.height as f64;
                 }
+                orientation = meta.orientation;
                 metadata_json = serde_json::json!({
                     "exif": meta.exif,
                     "location": meta.location.map(|l| serde_json::json!({"lat": l.lat, "lng": l.lng})),
@@ -331,6 +333,7 @@ async fn finalize_upload(
         storage_path,
         mime_type: mime_type.clone(),
         video_thumb_path,
+        orientation,
     });
 
     // Update storage usage
