@@ -13,10 +13,11 @@ import Admin from './pages/Admin'
 import Dashboard from './pages/Dashboard'
 import SharedLinks from './pages/SharedLinks'
 import MapPage from './pages/Map'
+import Explorer from './pages/Explorer'
 import Mosaic from './pages/Mosaic'
 import PublicShare from './pages/PublicShare'
 import Layout from './components/layout/Layout'
-// import { ReloadPrompt } from './components/pwa/ReloadPrompt'
+import { ReloadPrompt } from './components/pwa/ReloadPrompt'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!api.isAuthenticated()) return <Navigate to="/login" replace />
@@ -26,7 +27,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <>
-      {/* <ReloadPrompt /> */}
+      <ReloadPrompt />
       <Toaster
         position="bottom-center"
         richColors
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="albums/:id" element={<AlbumDetail />} />
           <Route path="shared" element={<SharedLinks />} />
           <Route path="map" element={<MapPage />} />
+          <Route path="explore" element={<Explorer />} />
           <Route path="mosaic" element={<Mosaic />} />
           <Route path="admin" element={<Admin />} />
           <Route path="dashboard" element={<Dashboard />} />

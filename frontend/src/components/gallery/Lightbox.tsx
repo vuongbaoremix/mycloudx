@@ -2,14 +2,13 @@ import { useEffect, useLayoutEffect, useCallback, useState, useRef, useMemo } fr
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion'
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import {
   X,
   ChevronLeft,
   ChevronRight,
   Heart,
-  ZoomIn,
-  ZoomOut,
   RotateCw,
   FlipHorizontal,
   MapPin,
@@ -53,7 +52,12 @@ function getMediaSrc(item: MediaItem) {
   if (item.mime_type.startsWith('image/') && item.thumbnails?.web) {
     return item.thumbnails.web
   }
-  return `/api/media/serve/${encodeURIComponent(item.storage_path)}`
+  if (item.storage_path) {
+    return `/api/media/serve/${encodeURIComponent(item.storage_path)}`
+  }
+  
+  // Ultimate fallback if backend DTO was cached or missing storage_path
+  return item.thumbnails?.large || item.thumbnails?.medium || item.thumbnails?.small || item.thumbnails?.micro || '';
 }
 
 function getThumbSrc(item: MediaItem) {
@@ -146,43 +150,24 @@ export default function Lightbox({
 }: LightboxProps) {
   const current = media[currentIndex]
   const [showMetadata, setShowMetadata] = useState(false)
+  const [showUI, setShowUI] = useState(true)
 
   // Zoom & transform state
-  const [zoom, setZoom] = useState(1)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isZoomed, setIsZoomed] = useState(false)
   const [rotation, setRotation] = useState(0)
   const [flip, setFlip] = useState(false)
 
   // Swipe state
-  const [dragOffset, setDragOffset] = useState(0)
-  const [isSwiping, setIsSwiping] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const isAnimatingRef = useRef(false)
+  const x = useMotionValue(0)
 
-  // Pinch state
-  const [initialPinchDist, setInitialPinchDist] = useState<number | null>(null)
-  const [initialPinchZoom, setInitialPinchZoom] = useState(1)
-  const [touchPanStart, setTouchPanStart] = useState<{ x: number; y: number } | null>(null)
-  const [initialPan, setInitialPan] = useState({ x: 0, y: 0 })
-  const [lastTap, setLastTap] = useState(0)
-
-  // Reset on image change — useLayoutEffect prevents flicker
-  // (runs synchronously before browser paint)
+  // Reset on image change
   useLayoutEffect(() => {
-    isAnimatingRef.current = true
-    setDragOffset(0)
-    setIsSwiping(false)
-    setZoom(1)
-    setPan({ x: 0, y: 0 })
+    x.set(0)
+    setIsZoomed(false)
     setRotation(0)
     setFlip(false)
-    // Re-enable transitions after browser has painted the new image
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        isAnimatingRef.current = false
-      })
-    })
-  }, [currentIndex])
+  }, [currentIndex, x])
 
   // Keyboard
   const handleKeyDown = useCallback(
@@ -221,182 +206,49 @@ export default function Lightbox({
     })
   }, [currentIndex, media])
 
-  // ====== SWIPE HANDLING (touch-based, manual for max control) ======
-  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null)
-  // Cache containerWidth in a ref to avoid forced layout reads on every render
-  const containerWidthRef = useRef(typeof window !== 'undefined' ? window.innerWidth : 800)
-  useEffect(() => {
-    const update = () => {
-      containerWidthRef.current = containerRef.current?.offsetWidth || window.innerWidth
-    }
-    update()
-    window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
-  }, [])
-  const containerWidth = containerWidthRef.current
+  const handleDownload = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const auth_token = typeof window !== 'undefined' ? localStorage.getItem('mycloud_token') : null;
+    if (!auth_token) return;
+    try {
+      const res = await fetch('/api/auth/download-token', {
+        headers: { 'Authorization': `Bearer ${auth_token}` }
+      });
+      if (!res.ok) throw new Error('Failed to get download token');
+      const data = await res.json();
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) {
-      // Pinch start
-      const dist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      )
-      setInitialPinchDist(dist)
-      setInitialPinchZoom(zoom)
-      touchStartRef.current = null
-      return
-    }
-
-    if (zoom > 1) {
-      // Pan mode when zoomed
-      setTouchPanStart({ x: e.touches[0].clientX, y: e.touches[0].clientY })
-      setInitialPan({ ...pan })
-      return
-    }
-
-    // Swipe start
-    touchStartRef.current = {
-      x: e.touches[0].clientX,
-      y: e.touches[0].clientY,
-      time: Date.now(),
-    }
-    setIsSwiping(true)
-  }
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2 && initialPinchDist !== null) {
-      // Pinch zoom
-      const dist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      )
-      const scale = dist / initialPinchDist
-      const newZoom = Math.min(Math.max(1, initialPinchZoom * scale), 5)
-      setZoom(newZoom)
-      if (newZoom === 1) setPan({ x: 0, y: 0 })
-      return
-    }
-
-    if (zoom > 1 && touchPanStart) {
-      // Pan when zoomed
-      const dx = e.touches[0].clientX - touchPanStart.x
-      const dy = e.touches[0].clientY - touchPanStart.y
-      setPan({ x: initialPan.x + dx, y: initialPan.y + dy })
-      return
-    }
-
-    // Swipe — move images with finger
-    if (!touchStartRef.current || e.touches.length !== 1) return
-    const dx = e.touches[0].clientX - touchStartRef.current.x
-    const dy = e.touches[0].clientY - touchStartRef.current.y
-
-    // Only register horizontal swipe if horizontal movement > vertical
-    if (Math.abs(dx) > Math.abs(dy) * 0.7) {
-      // Add resistance at edges
-      let offset = dx
-      if ((currentIndex === 0 && dx > 0) || (currentIndex === media.length - 1 && dx < 0)) {
-        offset = dx * 0.3 // Rubber band effect at edges
-      }
-      setDragOffset(offset)
+      const link = document.createElement('a');
+      link.href = `/api/media/${current.id}/download?token=${data.token}`;
+      link.download = current.original_name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error("Download failed", err);
+      alert("Không thể tải xuống. Vui lòng thử lại.");
     }
   }
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    // Double-tap zoom
-    const now = Date.now()
-    if (e.touches.length === 0 && e.changedTouches.length === 1 && !isSwiping) {
-      // This was a tap, not a swipe
-    }
-    if (e.touches.length === 0 && e.changedTouches.length === 1) {
-      const wasMoved = Math.abs(dragOffset) > 5
-      if (!wasMoved && now - lastTap < 300) {
-        // Double tap
-        if (zoom > 1) {
-          setZoom(1)
-          setPan({ x: 0, y: 0 })
-        } else {
-          setZoom(2.5)
-        }
-        setLastTap(0)
-        setDragOffset(0)
-        setIsSwiping(false)
-        touchStartRef.current = null
-        return
+  const handleDragEnd = (_e: any, { offset, velocity }: any) => {
+    if (isZoomed) return;
+    const threshold = window.innerWidth * 0.15;
+    if (offset.x < -threshold || (offset.x < -30 && velocity.x < -300)) {
+      if (currentIndex < media.length - 1) {
+        animate(x, -window.innerWidth, { duration: 0.3, ease: [0.25, 1, 0.5, 1] }).then(() => onNavigate(currentIndex + 1));
+        return;
       }
-      setLastTap(now)
-    }
-
-    setInitialPinchDist(null)
-    setTouchPanStart(null)
-
-    // Swipe end — determine if we should navigate
-    if (touchStartRef.current && zoom <= 1) {
-      const velocity = touchStartRef.current
-        ? Math.abs(dragOffset) / Math.max(1, (Date.now() - touchStartRef.current.time)) * 1000
-        : 0
-      const threshold = containerWidth * 0.15
-
-      if (dragOffset < -threshold || (dragOffset < -30 && velocity > 300)) {
-        // Swipe left → next
-        if (currentIndex < media.length - 1) {
-          // Animate out to left then navigate
-          animateAndNavigate(currentIndex + 1, -containerWidth)
-          touchStartRef.current = null
-          return
-        }
-      } else if (dragOffset > threshold || (dragOffset > 30 && velocity > 300)) {
-        // Swipe right → previous
-        if (currentIndex > 0) {
-          animateAndNavigate(currentIndex - 1, containerWidth)
-          touchStartRef.current = null
-          return
-        }
+    } else if (offset.x > threshold || (offset.x > 30 && velocity.x > 300)) {
+      if (currentIndex > 0) {
+        animate(x, window.innerWidth, { duration: 0.3, ease: [0.25, 1, 0.5, 1] }).then(() => onNavigate(currentIndex - 1));
+        return;
       }
     }
-
     // Snap back
-    setDragOffset(0)
-    setIsSwiping(false)
-    touchStartRef.current = null
-  }
-
-  const animateAndNavigate = (newIndex: number, direction: number) => {
-    // Step 1: Enable CSS transition and slide image off-screen
-    setIsSwiping(false)
-    setDragOffset(direction)
-
-    // Step 2: After slide-out animation completes, navigate
-    // useLayoutEffect on [currentIndex] will handle the instant reset
-    setTimeout(() => {
-      onNavigate(newIndex)
-    }, 300)
-  }
-
-  // Mouse wheel zoom
-  const handleWheel = (e: React.WheelEvent) => {
-    const delta = e.deltaY * -0.005
-    const newZoom = Math.min(Math.max(1, zoom + delta), 5)
-    setZoom(newZoom)
-    if (newZoom === 1) setPan({ x: 0, y: 0 })
-  }
-
-  // Mouse drag for desktop
-  const handleMouseDragDown = (e: React.MouseEvent) => {
-    if (zoom > 1) {
-      e.preventDefault()
-      const startX = e.clientX - pan.x
-      const startY = e.clientY - pan.y
-      const move = (ev: MouseEvent) => setPan({ x: ev.clientX - startX, y: ev.clientY - startY })
-      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up) }
-      document.addEventListener('mousemove', move)
-      document.addEventListener('mouseup', up)
-    }
+    animate(x, 0, { type: "spring", stiffness: 300, damping: 30 });
   }
 
   if (!current) return null
 
-  const isZoomed = zoom > 1
   const prev = currentIndex > 0 ? media[currentIndex - 1] : null
   const next = currentIndex < media.length - 1 ? media[currentIndex + 1] : null
   const sizeClass = showMetadata ? 'max-w-[75vw] max-h-[70vh]' : 'max-w-[95vw] max-h-[80vh]'
@@ -424,25 +276,22 @@ export default function Lightbox({
       {/* Photo Viewer Area */}
       <div
         ref={containerRef}
-        className="flex-1 relative overflow-hidden touch-none select-none"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDragDown}
+        className="flex-1 relative overflow-hidden select-none touch-none"
+        onClick={() => setShowUI(s => !s)}
       >
         {/* ===== UNIFIED CAROUSEL & ZOOM VIEW ===== */}
-        <div
+        <motion.div
           className="absolute inset-0 flex items-center justify-center will-change-transform"
-          style={{
-            transform: `translate3d(${!isZoomed ? dragOffset : 0}px, 0, 0)`,
-            transition: (isSwiping || isAnimatingRef.current) ? 'none' : 'transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)',
-          }}
+          style={{ x }}
+          drag={!isZoomed ? "x" : false}
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={1}
+          onDragEnd={handleDragEnd}
         >
-          {/* Previous image — to the left */}
+          {/* Previous image */}
           {prev && !isZoomed && (
             <div
-              className="absolute inset-0 flex items-center justify-center"
+              className="absolute inset-0 flex items-center justify-center p-2"
               style={{ transform: `translateX(-100%)` }}
             >
               <img
@@ -454,36 +303,54 @@ export default function Lightbox({
             </div>
           )}
 
-          {/* Current image — unified to handle pan and zoom without re-mounting */}
-          <div
-            className="flex items-center justify-center w-full h-full will-change-transform transform-gpu"
-            style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) scaleX(${flip ? -1 : 1}) rotate(${rotation}deg) translateZ(0)`,
-              transition: (isZoomed && !isSwiping) ? 'none' : 'transform 0.3s ease',
-              cursor: isZoomed ? 'grab' : 'auto',
-            }}
-          >
-            {current.mime_type.startsWith('video/') ? (
-              <VideoPlayer
-                src={`/api/media/serve/${encodeURIComponent(current.storage_path)}`}
-                poster={current.thumbnails?.web || current.thumbnails?.large}
-                className={`drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass}`}
-              />
-            ) : (
-              <img
-                src={getMediaSrc(current)}
-                alt={current.original_name}
-                className={`object-contain drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass} pointer-events-none`}
-                draggable={false}
-                decoding="async"
-              />
-            )}
+          {/* Current image with Zoom implementation */}
+          <div className="flex items-center justify-center w-full h-full transform-gpu relative z-10" onClick={(e) => e.stopPropagation()}>
+            <TransformWrapper
+              initialScale={1}
+              initialPositionX={0}
+              initialPositionY={0}
+              onTransformed={(ref) => setIsZoomed(ref.state.scale > 1)}
+              doubleClick={{ step: 1.5 }}
+              disablePadding
+
+            >
+              <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }} contentStyle={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div
+                  className="flex items-center justify-center w-full h-full"
+                  onClick={() => setShowUI(s => !s)}
+                  style={{ transform: `scaleX(${flip ? -1 : 1}) rotate(${rotation}deg)` }}
+                >
+                  {current.mime_type.startsWith('video/') ? (
+                    <VideoPlayer
+                      src={`/api/media/serve/${encodeURIComponent(current.storage_path)}`}
+                      poster={current.thumbnails?.web || current.thumbnails?.large}
+                      className={`drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass}`}
+                    />
+                  ) : (
+                    <img
+                      src={getMediaSrc(current)}
+                      alt={current.original_name}
+                      className={`object-contain drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass} pointer-events-none`}
+                      draggable={false}
+                      decoding="async"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        const fallback = current.thumbnails?.medium || current.thumbnails?.small || current.thumbnails?.micro;
+                        if (fallback && target.src !== new URL(fallback, window.location.href).href) {
+                          target.src = fallback;
+                        }
+                      }}
+                    />
+                  )}
+                </div>
+              </TransformComponent>
+            </TransformWrapper>
           </div>
 
-          {/* Next image — to the right */}
+          {/* Next image */}
           {next && !isZoomed && (
             <div
-              className="absolute inset-0 flex items-center justify-center"
+              className="absolute inset-0 flex items-center justify-center p-2"
               style={{ transform: `translateX(100%)` }}
             >
               <img
@@ -494,106 +361,131 @@ export default function Lightbox({
               />
             </div>
           )}
-        </div>
+        </motion.div>
 
-        {/* ===== TOP UI ===== */}
-        {/* Counter */}
-        <div className="absolute top-4 left-4 md:top-6 md:left-6 z-30">
-          <span className="text-white/60 text-sm font-medium bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5">
-            {currentIndex + 1} / {media.length}
-          </span>
-        </div>
+        {/* ===== UI OVERLAYS ===== */}
+        <AnimatePresence>
+          {showUI && (
+            <>
+              {/* DESKTOP TOP HEADER (hidden on mobile) */}
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="hidden md:flex absolute top-6 left-6 z-30 pointer-events-none"
+              >
+                <div className="flex items-center pointer-events-auto">
+                  <span className="text-white/60 text-sm font-medium bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5 shadow-lg">
+                    {currentIndex + 1} / {media.length}
+                  </span>
+                </div>
+              </motion.div>
 
-        {/* Info + Close */}
-        <div className="absolute top-4 right-4 md:top-6 md:right-6 flex items-center gap-3 z-30">
-          <button
-            className={`w-11 h-11 flex items-center justify-center rounded-full transition-all backdrop-blur-xl border shadow-lg ${showMetadata ? 'bg-primary text-white border-primary/30' : 'bg-white/10 text-white/80 hover:bg-white/20 hover:text-white border-white/5'}`}
-            onClick={(e) => { e.stopPropagation(); setShowMetadata(!showMetadata) }}
-            title="Chi tiết ảnh"
-          >
-            <Info size={20} />
-          </button>
-          <button
-            className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-error-container text-white/80 hover:text-error transition-all backdrop-blur-xl border border-white/5 shadow-lg"
-            onClick={(e) => { e.stopPropagation(); onClose() }}
-            title="Đóng"
-          >
-            <X size={20} />
-          </button>
-        </div>
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="hidden md:flex absolute top-6 right-6 z-30 items-center justify-end gap-3 pointer-events-none"
+              >
+                <div className="flex items-center gap-3 pointer-events-auto">
+                  <button
+                    className={`w-11 h-11 flex items-center justify-center rounded-full transition-all backdrop-blur-xl border shadow-lg ${showMetadata ? 'bg-primary text-white border-primary/30' : 'bg-white/10 text-white/80 hover:bg-white/20 hover:text-white border-white/5'}`}
+                    onClick={(e) => { e.stopPropagation(); setShowMetadata(!showMetadata) }}
+                    title="Chi tiết ảnh"
+                  >
+                    <Info size={20} />
+                  </button>
+                  <button
+                    className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-error-container text-white/80 hover:text-error transition-all backdrop-blur-xl border border-white/5 shadow-lg"
+                    onClick={(e) => { e.stopPropagation(); onClose() }}
+                    title="Đóng"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </motion.div>
 
-        {/* ===== TOP TOOLBAR ===== */}
-        <div className="absolute bottom-[5.5rem] md:bottom-auto md:top-6 left-1/2 -translate-x-1/2 flex items-center gap-1.5 md:gap-2 bg-white/10 hover:bg-white/15 transition-colors backdrop-blur-xl px-3 md:px-4 py-1.5 md:py-2 rounded-full border border-white/5 z-30 shadow-lg">
-          <button className="p-2 text-white/80 hover:text-white transition-colors"
-            onClick={(e) => { e.stopPropagation(); setZoom(z => Math.max(1, z - 0.5)) }}>
-            <ZoomOut size={20} />
-          </button>
-          <button className="p-2 text-white/80 hover:text-white transition-colors"
-            onClick={(e) => { e.stopPropagation(); setZoom(z => Math.min(5, z + 0.5)) }}>
-            <ZoomIn size={20} />
-          </button>
-          <div className="w-px h-6 bg-white/20 mx-1"></div>
-          <button className="p-2 text-white/80 hover:text-white transition-colors"
-            onClick={(e) => { e.stopPropagation(); setRotation(r => r + 90) }}>
-            <RotateCw size={20} />
-          </button>
-          <button className="p-2 text-white/80 hover:text-white transition-colors"
-            onClick={(e) => { e.stopPropagation(); setFlip(f => !f) }}>
-            <FlipHorizontal size={20} />
-          </button>
-          <div className="w-px h-6 bg-white/20 mx-1"></div>
-          <button
-            onClick={async (e) => {
-              e.stopPropagation();
-              const auth_token = typeof window !== 'undefined' ? localStorage.getItem('mycloud_token') : null;
-              if (!auth_token) return;
-              try {
-                const res = await fetch('/api/auth/download-token', {
-                  headers: { 'Authorization': `Bearer ${auth_token}` }
-                });
-                if (!res.ok) throw new Error('Failed to get download token');
-                const data = await res.json();
-                
-                const link = document.createElement('a');
-                link.href = `/api/media/${current.id}/download?token=${data.token}`;
-                link.download = current.original_name;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-              } catch (err) {
-                console.error("Download failed", err);
-                alert("Không thể tải xuống. Vui lòng thử lại.");
-              }
-            }}
-            className="p-2 text-white/80 hover:text-white transition-colors"
-          >
-            <Download size={20} />
-          </button>
-          <button className="p-2 transition-colors ml-1" onClick={() => onFavorite(current.id)}>
-            <Heart size={20} fill={current.is_favorite ? '#f59e0b' : 'none'} color={current.is_favorite ? '#f59e0b' : 'white'} />
-          </button>
-        </div>
+              {/* DESKTOP TOP TOOLBAR */}
+              <motion.div
+                initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }}
+                className="hidden md:flex absolute top-6 left-1/2 -translate-x-1/2 items-center gap-2 bg-white/10 hover:bg-white/15 transition-colors backdrop-blur-xl px-4 py-2 rounded-full border border-white/5 z-30 shadow-lg"
+              >
+                <button className="p-2 text-white/80 hover:text-white transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setRotation(r => r + 90) }} title="Xoay ảnh">
+                  <RotateCw size={20} />
+                </button>
+                <button className="p-2 text-white/80 hover:text-white transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setFlip(f => !f) }} title="Lật ảnh">
+                  <FlipHorizontal size={20} />
+                </button>
+                <div className="w-px h-6 bg-white/20 mx-1"></div>
+                <button
+                  onClick={handleDownload}
+                  className="p-2 text-white/80 hover:text-white transition-colors" title="Tải xuống"
+                >
+                  <Download size={20} />
+                </button>
+                <button className="p-2 transition-colors ml-1" onClick={(e) => { e.stopPropagation(); onFavorite(current.id) }}>
+                  <Heart size={20} fill={current.is_favorite ? '#f59e0b' : 'none'} color={current.is_favorite ? '#f59e0b' : 'white'} />
+                </button>
+              </motion.div>
 
-        {/* ===== DESKTOP NAV BUTTONS (hidden on mobile) ===== */}
-        {currentIndex > 0 && (
-          <button
-            className="hidden md:flex absolute left-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors z-20"
-            onClick={(e) => { e.stopPropagation(); onNavigate(currentIndex - 1) }}
-          >
-            <ChevronLeft size={28} />
-          </button>
-        )}
-        {currentIndex < media.length - 1 && (
-          <button
-            className="hidden md:flex absolute right-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors z-20"
-            onClick={(e) => { e.stopPropagation(); onNavigate(currentIndex + 1) }}
-          >
-            <ChevronRight size={28} />
-          </button>
-        )}
+              {/* MOBILE UNIFIED TOP HEADER */}
+              <motion.div
+                initial={{ y: '-100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '-100%', opacity: 0 }}
+                className="md:hidden absolute top-0 left-0 right-0 z-40 bg-gradient-to-b from-black/80 to-transparent pt-2 pb-4 px-3 flex flex-col pointer-events-none"
+              >
+                <div className="flex items-center justify-between pointer-events-auto mt-2">
+                  <div className="flex items-center gap-2">
+                    <button className="p-2 text-white hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); onClose() }}>
+                      <ChevronLeft size={28} />
+                    </button>
+                    <span className="text-white/90 text-sm font-medium ml-1 bg-white/10 px-2 py-1 rounded-md">{currentIndex + 1} / {media.length}</span>
+                  </div>
 
-        {/* ===== THUMBNAIL STRIP ===== */}
-        <ThumbnailStrip media={media} currentIndex={currentIndex} onNavigate={onNavigate} />
+                  <div className="flex items-center gap-1 text-white/90">
+                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); setFlip(f => !f) }} title="Lật ảnh">
+                      <FlipHorizontal size={22} />
+                    </button>
+                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); setRotation(r => r + 90) }} title="Xoay ảnh">
+                      <RotateCw size={22} />
+                    </button>
+                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); onFavorite(current.id) }}>
+                      <Heart size={22} fill={current.is_favorite ? '#f59e0b' : 'none'} color={current.is_favorite ? '#f59e0b' : 'currentColor'} />
+                    </button>
+                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={handleDownload}><Download size={22} /></button>
+                    <button className={`p-2 rounded-full transition-colors ${showMetadata ? 'bg-primary/80 text-white' : 'hover:bg-white/10'}`}
+                      onClick={(e) => { e.stopPropagation(); setShowMetadata(!showMetadata) }}>
+                      <Info size={22} />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+
+              {/* ===== DESKTOP NAV BUTTONS (hidden on mobile) ===== */}
+              {currentIndex > 0 && (
+                <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="hidden md:flex absolute left-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors z-20 shadow-lg pointer-events-auto"
+                  onClick={(e) => { e.stopPropagation(); onNavigate(currentIndex - 1) }}
+                >
+                  <ChevronLeft size={28} />
+                </motion.button>
+              )}
+              {currentIndex < media.length - 1 && (
+                <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="hidden md:flex absolute right-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors z-20 shadow-lg pointer-events-auto"
+                  onClick={(e) => { e.stopPropagation(); onNavigate(currentIndex + 1) }}
+                >
+                  <ChevronRight size={28} />
+                </motion.button>
+              )}
+
+              {/* ===== THUMBNAIL STRIP ===== */}
+              <motion.div
+                initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
+                className="absolute bottom-2 md:bottom-4 left-1/2 -translate-x-1/2 z-30 max-w-[95vw] md:max-w-[70vw] pointer-events-auto"
+              >
+                <ThumbnailStrip media={media} currentIndex={currentIndex} onNavigate={onNavigate} />
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ===== MOBILE METADATA PANEL (full-screen, photo on top + info below) ===== */}

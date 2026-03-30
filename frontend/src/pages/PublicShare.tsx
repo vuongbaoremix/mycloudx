@@ -5,12 +5,13 @@ import { toast } from 'sonner'
 import Lightbox from '../components/gallery/Lightbox'
 import api from '../api/client'
 import ViewModeToggle, { type ViewMode } from '../components/gallery/ViewModeToggle'
+import { APP_LOGO } from '../constants'
 
 export default function PublicShare() {
   const { token } = useParams<{ token: string }>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
+
   const [needsPassword, setNeedsPassword] = useState(false)
   const [password, setPassword] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -80,11 +81,11 @@ export default function PublicShare() {
           </div>
           <h2 className="text-2xl font-bold text-center mb-2 text-on-surface font-headline">Yêu cầu bảo mật</h2>
           <p className="text-on-surface-variant text-center text-sm mb-8">Liên kết này được bảo vệ bằng mật khẩu. Vui lòng nhập mật khẩu để tiếp tục.</p>
-          
+
           <div className="form-group mb-6">
-            <input 
-              type="password" 
-              className="form-input bg-surface-container w-full" 
+            <input
+              type="password"
+              className="form-input bg-surface-container w-full"
               placeholder="Nhập mật khẩu..."
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -92,9 +93,9 @@ export default function PublicShare() {
               autoFocus
             />
           </div>
-          
-          <button 
-            type="submit" 
+
+          <button
+            type="submit"
             className="btn btn-primary w-full py-3"
             disabled={verifying}
           >
@@ -111,7 +112,7 @@ export default function PublicShare() {
       <header className="sticky top-0 z-40 bg-surface/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Logo" className="h-9 w-9 object-contain" />
+            <img src={APP_LOGO} alt="Logo" className="h-9 w-9 object-contain" />
             <div className="flex flex-col translate-y-0.5">
               <span className="text-lg font-bold font-headline tracking-tight leading-none flex items-center">
                 <span className="text-slate-500 dark:text-slate-400">My</span>
@@ -135,7 +136,7 @@ export default function PublicShare() {
             <h1 className="text-3xl font-bold font-headline mb-2">Thư viện chia sẻ</h1>
             <p className="text-on-surface-variant">Bạn đang xem {shareType === 'album' ? 'một album được chia sẻ' : 'các tệp được chia sẻ'}</p>
           </div>
-          
+
           <ViewModeToggle viewMode={viewMode} setViewMode={setViewMode} />
         </div>
 
@@ -160,7 +161,7 @@ export default function PublicShare() {
 
               const isVideo = item.mime_type?.startsWith('video/')
               if (!thumbSrc && isVideo) thumbSrc = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnPg==';
-              
+
               return (
                 <div
                   key={item.id}
@@ -174,7 +175,7 @@ export default function PublicShare() {
                     loading="lazy"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-on-background/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                  
+
                   {isVideo && (
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-on-background/20 transition-all">
                       <span className="material-symbols-outlined text-white text-5xl" data-icon="play_circle">play_circle</span>
@@ -200,7 +201,7 @@ export default function PublicShare() {
           currentIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
           onNavigate={setLightboxIndex}
-          onFavorite={() => {}}
+          onFavorite={() => { }}
         />
       )}
     </div>

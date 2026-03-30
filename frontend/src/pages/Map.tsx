@@ -27,10 +27,14 @@ interface MediaItem {
   id: string
   original_name: string
   mime_type: string
+  size?: number
+  width?: number
+  height?: number
   thumbnails: {
     micro?: string
     small?: string
     medium?: string
+    web?: string
   }
   blur_hash?: string
   aspect_ratio: number
@@ -50,19 +54,17 @@ interface MediaItem {
   }
 }
 
-// Custom marker icon matching the dark theme
-const createCustomIcon = (isFavorite: boolean) =>
-  L.divIcon({
+// Custom marker icon using image thumbnail
+const createCustomIcon = (item: MediaItem) => {
+  const thumb = item.thumbnails.micro || item.thumbnails.small || item.thumbnails.medium || item.thumbnails.web || (item.storage_path ? `/api/media/serve/${encodeURIComponent(item.storage_path)}` : '');
+  return L.divIcon({
     className: 'map-marker-custom',
-    html: `<div class="map-marker-dot ${isFavorite ? 'favorite' : ''}">
-             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-             </svg>
-           </div>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
-    popupAnchor: [0, -28],
-  })
+    html: `<div class="map-marker-thumb ${item.is_favorite ? 'favorite' : ''}" style="background-image: url('${thumb}')"></div>`,
+    iconSize: [44, 44],
+    iconAnchor: [22, 54],
+    popupAnchor: [0, -48],
+  });
+}
 
 // Component to fit bounds on data load
 function FitBounds({ items }: { items: MediaItem[] }) {
@@ -71,7 +73,7 @@ function FitBounds({ items }: { items: MediaItem[] }) {
   useEffect(() => {
     if (items.length === 0) return
     const points = items
-      .filter((m) => m.metadata?.location)
+      .filter((m) => m.metadata?.location?.lat != null && m.metadata?.location?.lng != null)
       .map((m) => [m.metadata!.location!.lat, m.metadata!.location!.lng] as [number, number])
     if (points.length > 0) {
       const bounds = L.latLngBounds(points)
@@ -118,6 +120,7 @@ export default function MapPage() {
   }
 
   const handleMarkerClick = (item: MediaItem) => {
+    console.log("Clicked Map Marker:", item);
     setSelectedMedia(item)
   }
 
@@ -184,15 +187,27 @@ export default function MapPage() {
 
           <FitBounds items={media} />
 
-          <MarkerClusterGroup chunkedLoading maxClusterRadius={60}>
+          <MarkerClusterGroup 
+            chunkedLoading 
+            maxClusterRadius={60}
+            iconCreateFunction={(cluster: any) => {
+              const count = cluster.getChildCount();
+              return L.divIcon({
+                html: `<div class="cluster-icon">${count}</div>`,
+                className: 'custom-cluster-marker',
+                iconSize: [44, 44],
+                iconAnchor: [22, 22]
+              });
+            }}
+          >
             {media.map((item) => {
-              if (!item.metadata?.location) return null
+              if (item.metadata?.location?.lat == null || item.metadata?.location?.lng == null) return null
               const { lat, lng } = item.metadata.location
               return (
                 <Marker
                   key={item.id}
                   position={[lat, lng]}
-                  icon={createCustomIcon(item.is_favorite)}
+                  icon={createCustomIcon(item)}
                   eventHandlers={{
                     click: () => handleMarkerClick(item),
                   }}
@@ -200,9 +215,9 @@ export default function MapPage() {
                   <Popup className="rounded-xl overflow-hidden shadow-lg border-none" closeButton={false}>
                     <div className="flex flex-col w-48 bg-surface rounded-xl overflow-hidden">
                       <div className="h-32 w-full bg-surface-container-high relative">
-                        {item.thumbnails.small || item.thumbnails.micro ? (
+                        {item.thumbnails.small || item.thumbnails.micro || item.thumbnails.medium || item.thumbnails.web || item.storage_path ? (
                           <img
-                            src={item.thumbnails.small || item.thumbnails.micro}
+                            src={item.thumbnails.small || item.thumbnails.micro || item.thumbnails.medium || item.thumbnails.web || `/api/media/serve/${encodeURIComponent(item.storage_path)}`}
                             alt={item.original_name}
                             className="w-full h-full object-cover"
                           />
@@ -237,9 +252,9 @@ export default function MapPage() {
             
             <div className="p-4 flex flex-col gap-6">
               <div className="w-full aspect-square rounded-xl overflow-hidden bg-surface-container relative shadow-sm group">
-                {selectedMedia.thumbnails.medium || selectedMedia.thumbnails.small ? (
+                {selectedMedia.thumbnails.medium || selectedMedia.thumbnails.small || selectedMedia.thumbnails.web || selectedMedia.storage_path ? (
                   <img
-                    src={selectedMedia.thumbnails.medium || selectedMedia.thumbnails.small}
+                    src={selectedMedia.thumbnails.medium || selectedMedia.thumbnails.small || selectedMedia.thumbnails.web || `/api/media/serve/${encodeURIComponent(selectedMedia.storage_path)}`}
                     alt={selectedMedia.original_name}
                     className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform duration-500"
                     onClick={() => setLightboxIndex(media.findIndex(m => m.id === selectedMedia.id))}

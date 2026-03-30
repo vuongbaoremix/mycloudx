@@ -441,6 +441,19 @@ class ApiClient {
   async healthCheck() {
     return this.request<any>('/health');
   }
+
+  // Explorer
+  async getMemories() {
+    return this.request<any[]>('/explorer/memories');
+  }
+
+  async getExplorerScreenshots() {
+    return this.request<any[]>('/explorer/screenshots');
+  }
+
+  async getExplorerStats() {
+    return this.request<any>('/explorer/stats');
+  }
 }
 
 export const api = new ApiClient();

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import api from '../api/client'
+import { APP_LOGO } from '../constants'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -30,9 +31,9 @@ export default function Login() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,var(--primary),transparent_50%)] opacity-20 animate-breathe" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,var(--tertiary),transparent_50%)] opacity-20 animate-breathe" style={{ animationDelay: '1.5s' }} />
         <div className="absolute inset-0 backdrop-blur-[100px]" />
-        
+
         <div className="relative z-10 w-full max-w-lg">
-          <img src="/logo.png" alt="MyCloudX" className="w-24 h-24 object-contain mb-8 drop-shadow-2xl animate-slideUp" />
+          <img src={APP_LOGO} alt="MyCloudX" className="w-24 h-24 object-contain mb-8 drop-shadow-2xl animate-slideUp" />
           <h1 className="text-5xl font-extrabold font-headline mb-6 text-on-surface tracking-tight animate-slideUp" style={{ animationDelay: '100ms' }}>
             Lưu giữ mọi<br />khoảnh khắc của bạn
           </h1>
@@ -45,10 +46,10 @@ export default function Login() {
       {/* Right side - Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 relative">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_100%_0%,rgba(129,140,248,0.15),transparent_50%)]" />
-        
+
         <div className="w-full max-w-md relative z-10 animate-fadeIn">
           <div className="lg:hidden flex items-center gap-3 mb-10">
-            <img src="/logo.png" alt="Logo" className="w-12 h-12 object-contain" />
+            <img src={APP_LOGO} alt="Logo" className="w-12 h-12 object-contain" />
             <div className="flex flex-col items-start translate-y-1">
               <h1 className="text-2xl font-bold font-headline tracking-tight leading-none flex items-center m-0">
                 <span className="text-on-surface-variant">My</span>
