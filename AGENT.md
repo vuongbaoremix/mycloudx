@@ -44,6 +44,7 @@ G:\Personal\MyCloud\
 │       ├── db/
 │       │   ├── mod.rs          # SQLite pool init & migrations
 │       │   └── seed.rs         # Admin user seeding
+│       ├── jobs.rs             # SQLite-backed persistent background jobs queue
 │       ├── imaging/
 │       │   ├── exif.rs         # EXIF metadata extraction
 │       │   └── thumbnail.rs    # Multi-size WebP (webp crate, variable quality)
@@ -58,6 +59,7 @@ G:\Personal\MyCloud\
 │       │   ├── admin.rs        # Admin panel endpoints
 │       │   ├── album.rs        # Album CRUD endpoints
 │       │   ├── auth.rs         # Login/register endpoints
+│       │   ├── explorer.rs     # Explorer (Memories, Stats, Screenshots)
 │       │   ├── health.rs       # Health check + system stats
 │       │   ├── media.rs        # Media CRUD + serve/download
 │       │   ├── search.rs       # Full-text search endpoint
@@ -92,7 +94,7 @@ G:\Personal\MyCloud\
 │       │   ├── layout/         # Sidebar, Header, SearchBar
 │       │   └── upload/         # GlobalUploadModal
 │       └── pages/              # Gallery (orchestrator), Favorites, Trash,
-│                               # Albums, AlbumDetail, Admin, SharedLinks,
+│                               # Albums, AlbumDetail, Admin, SharedLinks, Map, Explorer,
 │                               # Settings, Dashboard, Mosaic, PublicShare
 └── deploy/
     ├── Dockerfile              # Multi-stage: Bun + Rust MUSL → scratch
@@ -124,6 +126,7 @@ Compile-time macros like `sqlx::query!` are generally avoided since they require
 - `STORAGE_PROVIDER=cloudstore` — Delegates to external CloudStore API via HTTP
   - Requires `CLOUDSTORE_URL` and optionally `CLOUDSTORE_API_KEY`
   - CloudStore API: `PUT/GET/DELETE /api/files/{provider}/{path}` with Bearer auth
+  - **Streaming:** Media routes proxy HTTP `Range` requests directly via `reqwest` `bytes_stream` without buffering into memory, maintaining efficient video playback.
 
 ### Gallery Architecture (Virtualized)
 
@@ -141,8 +144,13 @@ Key dependencies: `@tanstack/react-virtual`, `blurhash`.
 
 Borders should always use `border-outline-variant/15` to `border-outline-variant/30` (with Tailwind opacity). Never use full-opacity borders. The dark mode `--outline-variant` is intentionally subtle (`#1e1e2e`) — adding opacity keeps borders barely visible for a premium feel.
 
-### Frontend Build
+### Build & Deployment
+
 Frontend is built with `bun run build` into `backend/embedded-frontend/`, which is embedded into the Rust binary via `rust-embed`. Use `bun dev` for development with Vite proxy.
+
+**Docker Caching:** The multi-stage `Dockerfile` uses a dummy `main.rs` to cache dependencies. To prevent `mtime` caching bugs causing empty binary builds, `RUN find src -type f -exec touch {} +` is used before compiling the real source code.
+
+**Scratch Image TLS:** `reqwest` requires the `rustls-tls-webpki-roots` feature explicitly enabled to perform HTTPS proxy requests in the final `<scratch>` container, as it lacks standard OS root certificates (`/etc/ssl/certs`).
 
 ## Common Commands (PowerShell)
 
@@ -208,6 +216,9 @@ docker compose -f deploy\docker-compose.yml up -d
 | Share | POST/GET | `/api/share` | Yes |
 | Share | DELETE | `/api/share/{id}` | Yes |
 | Search | GET | `/api/search?q=` | Yes |
+| Explorer | GET | `/api/explorer/memories` | Yes |
+| Explorer | GET | `/api/explorer/screenshots` | Yes |
+| Explorer | GET | `/api/explorer/stats` | Yes |
 | Health | GET | `/api/health` | No |
 | Health | GET | `/api/stats` | No |
 | Public | GET | `/api/s/{token}` | No |

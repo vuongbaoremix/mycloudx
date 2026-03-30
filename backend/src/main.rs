@@ -158,7 +158,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/register", post(routes::auth::register))
         .route("/health", get(routes::health::health_check))
         .route("/stats", get(routes::health::system_stats))
-        .route("/s/{token}", get(routes::share::access_share))
+        .route("/s/{token}", get(routes::share::access_share));
+
+    let public_media_routes = Router::new()
         .route("/media/serve/{*path}", get(routes::media::serve_file));
 
     let protected_routes = Router::new()
@@ -170,7 +172,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/media/{id}", delete(routes::media::delete_media))
         .route("/media/{id}/favorite", put(routes::media::toggle_favorite))
         .route("/media/{id}/restore", post(routes::media::restore_media))
-        .route("/media/{id}/download", get(routes::media::download_file))
         // Upload
         .route("/upload/session", post(routes::upload::create_session))
         .route("/upload/file", post(routes::upload::upload_file))
@@ -212,24 +213,52 @@ async fn main() -> anyhow::Result<()> {
         .route("/share/{id}", delete(routes::share::delete_share))
         // Search
         .route("/search", get(routes::search::search_media))
+        // Explorer
+        .route("/explorer/memories", get(routes::explorer::get_memories))
+        .route("/explorer/screenshots", get(routes::explorer::get_screenshots))
+        .route("/explorer/stats", get(routes::explorer::get_stats))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::require_auth,
         ));
 
-    let api_routes = Router::new().merge(public_routes).merge(protected_routes);
+    let protected_media_routes = Router::new()
+        .route("/media/{id}/download", get(routes::media::download_file))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::require_auth,
+        ));
+
+    let compressed_api = Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
+        .layer(tower_http::compression::CompressionLayer::new());
+
+    let uncompressed_api = Router::new()
+        .merge(public_media_routes)
+        .merge(protected_media_routes);
+
+    let api_routes = Router::new()
+        .merge(compressed_api)
+        .merge(uncompressed_api);
 
     let frontend_dir = std::env::var("FRONTEND_DIR").unwrap_or_default();
     let app = if !frontend_dir.is_empty() && std::path::Path::new(&frontend_dir).exists() {
         tracing::info!("Serving frontend from directory: {}", frontend_dir);
-        Router::new().nest("/api", api_routes).fallback_service(
-            tower_http::services::ServeDir::new(&frontend_dir).not_found_service(
-                tower_http::services::ServeFile::new(format!("{}/index.html", frontend_dir)),
-            ),
-        )
+        let frontend_router = Router::new()
+            .fallback_service(
+                tower_http::services::ServeDir::new(&frontend_dir).not_found_service(
+                    tower_http::services::ServeFile::new(format!("{}/index.html", frontend_dir)),
+                ),
+            )
+            .layer(tower_http::compression::CompressionLayer::new());
+        Router::new().nest("/api", api_routes).merge(frontend_router)
     } else {
         tracing::info!("Serving embedded frontend");
-        Router::new().nest("/api", api_routes).fallback(serve_frontend)
+        let frontend_router = Router::new()
+            .fallback(serve_frontend)
+            .layer(tower_http::compression::CompressionLayer::new());
+        Router::new().nest("/api", api_routes).merge(frontend_router)
     }
     .layer(
         CorsLayer::new()
@@ -237,7 +266,6 @@ async fn main() -> anyhow::Result<()> {
             .allow_methods(Any)
             .allow_headers(Any),
     )
-    .layer(tower_http::compression::CompressionLayer::new())
     .layer(DefaultBodyLimit::max(1024 * 1024 * 1024)) // 1 GB body limit
     .layer(TraceLayer::new_for_http())
     .with_state(state);

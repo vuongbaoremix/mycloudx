@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod album;
 pub mod auth;
+pub mod explorer;
 pub mod health;
 pub mod media;
 pub mod mosaic;

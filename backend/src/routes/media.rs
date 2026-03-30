@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, sqlite::Sqlite};
 
 use crate::auth::jwt::Claims;
-use crate::models::media::{Media, MediaResponse};
+use crate::models::media::{Media, MediaResponse, GeoMediaResponse};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -215,7 +215,49 @@ pub async fn serve_file(
         return Ok(res);
     }
 
-    // Fallback for non-local storage
+    // Proxy to CloudStore if available
+    if let Some(cloud_url) = state.storage.get_cloud_url(&decoded) {
+        let client = reqwest::Client::new();
+        let mut req_builder = client.get(&cloud_url);
+        
+        if let Some(api_key) = state.config.cloudstore_api_key.as_deref() {
+            req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+        
+        if let Some(range) = req.headers().get(axum::http::header::RANGE) {
+            req_builder = req_builder.header(reqwest::header::RANGE, range.clone());
+        }
+        
+        let upstream_res = req_builder.send().await
+            .map_err(|e| {
+                tracing::error!("Proxy to cloudstore failed: {}", e);
+                StatusCode::BAD_GATEWAY
+            })?;
+            
+        let mut res_builder = axum::http::Response::builder()
+            .status(upstream_res.status());
+            
+        let headers_to_forward = [
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::CONTENT_LENGTH,
+            reqwest::header::CONTENT_RANGE,
+            reqwest::header::ACCEPT_RANGES,
+        ];
+        
+        if let Some(headers) = res_builder.headers_mut() {
+            for name in &headers_to_forward {
+                if let Some(value) = upstream_res.headers().get(name) {
+                    headers.insert(name.clone(), value.clone());
+                }
+            }
+            headers.insert(axum::http::header::CACHE_CONTROL, axum::http::header::HeaderValue::from_static("public, max-age=31536000"));
+        }
+
+        let body = axum::body::Body::from_stream(upstream_res.bytes_stream());
+        return res_builder.body(body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // Fallback for non-local and non-cloud storage
     let data = state.storage.read(&decoded).await.map_err(|_| StatusCode::NOT_FOUND)?;
     let content_type = mime_guess::from_path(&decoded)
         .first_or_octet_stream()
@@ -260,7 +302,53 @@ pub async fn download_file(
         return Ok(res);
     }
 
-    // Fallback for non-local storage
+    // Proxy to CloudStore if available
+    if let Some(cloud_url) = state.storage.get_cloud_url(&media.storage_path) {
+        let client = reqwest::Client::new();
+        let mut req_builder = client.get(&cloud_url);
+        
+        if let Some(api_key) = state.config.cloudstore_api_key.as_deref() {
+            req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+        
+        if let Some(range) = req.headers().get(axum::http::header::RANGE) {
+            req_builder = req_builder.header(reqwest::header::RANGE, range.clone());
+        }
+        
+        let upstream_res = req_builder.send().await
+            .map_err(|e| {
+                tracing::error!("Proxy to cloudstore failed: {}", e);
+                StatusCode::BAD_GATEWAY
+            })?;
+            
+        let mut res_builder = axum::http::Response::builder()
+            .status(upstream_res.status());
+            
+        let headers_to_forward = [
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::CONTENT_LENGTH,
+            reqwest::header::CONTENT_RANGE,
+            reqwest::header::ACCEPT_RANGES,
+        ];
+        
+        if let Some(headers) = res_builder.headers_mut() {
+            for name in &headers_to_forward {
+                if let Some(value) = upstream_res.headers().get(name) {
+                    headers.insert(name.clone(), value.clone());
+                }
+            }
+            
+            headers.insert(
+                header::CONTENT_DISPOSITION,
+                header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", media.original_name)).unwrap()
+            );
+        }
+
+        let body = axum::body::Body::from_stream(upstream_res.bytes_stream());
+        return res_builder.body(body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // Fallback for non-local non-cloud storage
     let data = state.storage.read(&media.storage_path).await.map_err(|_| StatusCode::NOT_FOUND)?;
     
     let mut res = axum::response::IntoResponse::into_response(data);
@@ -273,14 +361,21 @@ pub async fn download_file(
 pub async fn get_geo_media(
     State(state): State<AppState>,
     claims: Claims,
-) -> Result<Json<Vec<MediaResponse>>, StatusCode> {
-    // In SQLite we can use generic json_extract or just LIKE to filter, assuming only geocoded media has location in metadata
-    let items = sqlx::query_as::<_, Media>("SELECT * FROM media WHERE user_id = ? AND metadata LIKE '%\"location\":%' AND deleted_at IS NULL ORDER BY created_at DESC")
-        .bind(&claims.sub)
+) -> Result<Json<Vec<GeoMediaResponse>>, StatusCode> {
+    // Utilize the JSON location index (idx_media_geo) effectively
+    let mut q_b = sqlx::QueryBuilder::<sqlx::Sqlite>::new("SELECT * FROM media WHERE user_id = ");
+    q_b.push_bind(&claims.sub);
+    q_b.push(" AND json_extract(metadata, '$.location.lat') IS NOT NULL AND deleted_at IS NULL AND status = 'ready' ORDER BY created_at DESC");
+
+    let items = q_b
+        .build_query_as::<Media>()
         .fetch_all(&state.db)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("Failed to fetch geo media: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    let resp: Vec<MediaResponse> = items.iter().map(MediaResponse::from_media).collect();
+    let resp: Vec<GeoMediaResponse> = items.iter().map(GeoMediaResponse::from_media).collect();
     Ok(Json(resp))
 }

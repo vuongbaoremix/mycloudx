@@ -52,7 +52,7 @@ sysinfo = "0.30"
 webpki-roots = "0.26"
 
 # HTTP client (for CloudStore provider)
-reqwest = { version = "0.12", features = ["rustls-tls", "json"], default-features = false }
+reqwest = { version = "0.12", features = ["rustls-tls-webpki-roots", "json", "stream"], default-features = false }
 zune-jpeg = "0.4"
 mozjpeg = "0.10"
 bytes = "1.11.1"
