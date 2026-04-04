@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Share2 } from 'lucide-react'
+import { ArrowLeft, Plus, Share2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import api from '../api/client'
 import Lightbox from '../components/gallery/Lightbox'
@@ -10,6 +10,7 @@ import { SkeletonAlbumDetail } from '../components/ui/Skeleton'
 
 export default function AlbumDetail() {
   const { id } = useParams<{ id: string }>()
+  const [albumData, setAlbumData] = useState<any>(null)
   const [album, setAlbum] = useState<any>(null)
   const [media, setMedia] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -20,9 +21,32 @@ export default function AlbumDetail() {
   const [shareOptions, setShareOptions] = useState({ expires_hours: '', max_views: '' })
   const [shareLink, setShareLink] = useState('')
 
+  const [collabQuery, setCollabQuery] = useState('')
+  const [collabRole, setCollabRole] = useState('viewer')
+  const [collabDl, setCollabDl] = useState(false)
+  const [searchUsers, setSearchUsers] = useState<any[]>([])
+  const [showDropdown, setShowDropdown] = useState(false)
+
+  useEffect(() => {
+    if (collabQuery.length < 2) {
+      setSearchUsers([])
+      setShowDropdown(false)
+      return
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.searchUsers(collabQuery)
+        setSearchUsers(res)
+        if (res.length > 0) setShowDropdown(true)
+      } catch (e) {}
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [collabQuery])
+
   useEffect(() => {
     if (!id) return
     api.getAlbum(id).then((data) => {
+      setAlbumData(data)
       setAlbum(data.album)
       setMedia(data.media)
       setLoading(false)
@@ -31,9 +55,14 @@ export default function AlbumDetail() {
 
   const handleRemoveMedia = async (mediaId: string) => {
     if (!id) return
-    await api.removeMediaFromAlbum(id, [mediaId])
-    setMedia((prev) => prev.filter((m) => m.id !== mediaId))
-    setAlbum((prev: any) => prev ? { ...prev, media_count: prev.media_count - 1 } : prev)
+    try {
+      await api.removeMediaFromAlbum(id, [mediaId])
+      setMedia((prev) => prev.filter((m) => m.id !== mediaId))
+      setAlbum((prev: any) => prev ? { ...prev, media_count: prev.media_count - 1 } : prev)
+      toast.success('Đã xóa khỏi album')
+    } catch {
+      toast.error('Không thể xóa khỏi album')
+    }
   }
 
   const handleOpenShareModal = () => {
@@ -69,9 +98,11 @@ export default function AlbumDetail() {
           <span className="text-sm text-muted">
             {album.media_count} ảnh
           </span>
-          <button className="btn btn-secondary flex items-center gap-2" onClick={handleOpenShareModal}>
-            <Share2 size={16} /> Chia sẻ
-          </button>
+          {albumData?.role !== 'viewer' && (
+            <button className="btn btn-secondary flex items-center gap-2" onClick={handleOpenShareModal}>
+              <Share2 size={16} /> Chia sẻ
+            </button>
+          )}
         </div>
       </div>
 
@@ -130,6 +161,17 @@ export default function AlbumDetail() {
                     <p className={`font-bold truncate max-w-[200px] ${viewMode === 'grid-medium' ? 'text-sm' : 'text-lg'}`}>{item.original_name}</p>
                   </div>
                 )}
+
+                {/* Remove from album button */}
+                {albumData?.role === 'owner' && (
+                  <button
+                    className="absolute top-2 right-2 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 hover:bg-red-500 text-white/80 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-10 backdrop-blur-sm"
+                    onClick={(e) => { e.stopPropagation(); handleRemoveMedia(item.id) }}
+                    title="Xóa khỏi album"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               </div>
             )
           })}
@@ -143,7 +185,15 @@ export default function AlbumDetail() {
           onClose={() => setLightboxIndex(null)}
           onNavigate={setLightboxIndex}
           onFavorite={() => {}}
-          onDelete={(id) => { handleRemoveMedia(id); setLightboxIndex(null) }}
+          onDelete={(mediaId) => {
+            handleRemoveMedia(mediaId)
+            // Navigate to next/prev or close if last item
+            if (media.length <= 1) {
+              setLightboxIndex(null)
+            } else if (lightboxIndex >= media.length - 1) {
+              setLightboxIndex(lightboxIndex - 1)
+            }
+          }}
         />
       )}
 
@@ -151,10 +201,97 @@ export default function AlbumDetail() {
       {showShareModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-md z-[200] flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-surface rounded-3xl p-8 w-full max-w-md shadow-2xl border border-outline-variant/10 animate-slideUpSpring">
-            <h3 className="text-2xl font-bold font-headline mb-6 text-on-surface tracking-tight">Chia sẻ Album</h3>
+            <div className="flex justify-between items-center mb-6">
+               <h3 className="text-2xl font-bold font-headline text-on-surface tracking-tight">Chia sẻ Album</h3>
+               <button className="btn btn-ghost p-2" onClick={() => setShowShareModal(false)}><X size={20}/></button>
+            </div>
             
             {!shareLink ? (
               <div className="space-y-5">
+                {albumData?.role === 'owner' && (
+                  <div className="bg-primary/5 p-4 rounded-2xl flex-col items-start gap-4 mb-4">
+                      <p className="text-sm font-semibold mb-2">Thêm người dùng trực tiếp</p>
+                      <div className="flex gap-2 w-full relative">
+                          <div className="flex-1 relative">
+                              <input 
+                                  className="form-input w-full bg-surface-container" 
+                                  placeholder="Tên hoặc Email..." 
+                                  value={collabQuery}
+                                  onChange={(e) => setCollabQuery(e.target.value)}
+                                  onFocus={() => { if (searchUsers.length > 0) setShowDropdown(true) }}
+                                  onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+                                  autoComplete="off"
+                              />
+                              {showDropdown && searchUsers.length > 0 && (
+                                  <div className="absolute top-full left-0 right-0 mt-1 bg-surface-container-high rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto border border-outline-variant/10">
+                                      {searchUsers.map(u => (
+                                          <div 
+                                              key={u.id} 
+                                              className="p-2 hover:bg-primary/10 cursor-pointer flex items-center gap-2 transition-colors"
+                                              onClick={() => {
+                                                  setCollabQuery(u.email)
+                                                  setShowDropdown(false)
+                                              }}
+                                          >
+                                              <div className="w-8 h-8 rounded-full bg-primary/20 flex flex-shrink-0 items-center justify-center text-primary font-bold overflow-hidden text-xs">
+                                                  {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover" /> : u.name?.charAt(0).toUpperCase()}
+                                              </div>
+                                              <div className="flex flex-col truncate">
+                                                  <span className="text-sm font-bold text-on-surface truncate">{u.name}</span>
+                                                  <span className="text-xs text-on-surface-variant truncate">{u.email}</span>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              )}
+                          </div>
+                          <select className="form-input bg-surface-container w-32" value={collabRole} onChange={(e) => setCollabRole(e.target.value)}>
+                              <option value="viewer">Chỉ xem</option>
+                              <option value="contributor">Đóng góp</option>
+                          </select>
+                      </div>
+                      <div className="mt-2 text-xs flex gap-2 items-center">
+                          <input type="checkbox" id="collab-dl" checked={collabDl} onChange={(e) => setCollabDl(e.target.checked)} />
+                          <label htmlFor="collab-dl">Cho phép tải xuống</label>
+                      </div>
+                      <button className="btn btn-primary mt-3 w-full" onClick={async () => {
+                          if (!collabQuery) return toast.error('Thiếu thông tin người dùng');
+                          try {
+                              await api.addCollaborator(id!, collabQuery, collabRole, collabDl);
+                              toast.success('Đã thêm người dùng');
+                              setCollabQuery('');
+                              api.getAlbum(id!).then(d => { setAlbumData(d); setAlbum(d.album); });
+                          } catch (e) {
+                              toast.error('Lỗi khi thêm người dùng, hoặc người dùng không tồn tại');
+                          }
+                      }}>Mời tham gia</button>
+                      
+                      {albumData?.collaborators?.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-outline-variant/30 w-full space-y-2 max-h-32 overflow-y-auto">
+                              <p className="text-xs font-semibold mb-2 text-on-surface-variant">Người đóng góp hiện tại:</p>
+                              {albumData.collaborators.map((c: any) => (
+                                  <div key={c.user_id} className="flex justify-between items-center text-xs bg-surface-container rounded-lg p-2">
+                                      <div className="flex flex-col truncate pr-2">
+                                          <span className="font-bold truncate">{c.name}</span>
+                                          <span className="text-[10px] text-on-surface-variant">{c.role === 'viewer' ? 'Chỉ xem' : 'Đóng góp'} {c.can_download ? '(Được tải)' : ''}</span>
+                                      </div>
+                                      <button className="text-error/80 hover:text-error" onClick={async () => {
+                                          if (window.confirm('Xóa quyền truy cập?')) {
+                                              await api.removeCollaborator(id!, c.user_id);
+                                              api.getAlbum(id!).then(d => setAlbumData(d));
+                                          }
+                                      }}>
+                                          <X size={14} />
+                                      </button>
+                                  </div>
+                              ))}
+                          </div>
+                      )}
+                  </div>
+                )}
+                
+                <h4 className="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-2">Hoặc tạo link công khai</h4>
+
                 <div className="form-group">
                   <label className="form-label text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-2">Giới hạn thời gian (giờ)</label>
                   <input 
