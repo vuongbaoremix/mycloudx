@@ -13,7 +13,9 @@ import {
   FlipHorizontal,
   MapPin,
   Download,
-  Info
+  Info,
+  Trash2,
+  MoreVertical
 } from 'lucide-react'
 import VideoPlayer from './VideoPlayer'
 
@@ -26,6 +28,7 @@ interface MediaItem {
   height?: number
   thumbnails: { web?: string; large?: string; medium?: string; small?: string; micro?: string }
   is_favorite: boolean
+  is_encrypted?: boolean
   storage_path: string
   created_at: string
   status?: string
@@ -45,23 +48,32 @@ interface LightboxProps {
   onNavigate: (index: number) => void
   onFavorite: (id: string) => void
   onDelete?: (id: string) => void
+  shareToken?: string
 }
 
-function getMediaSrc(item: MediaItem) {
+function appendToken(url: string, token?: string) {
+  if (!token || !url) return url
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}token=${token}`
+}
+
+function getMediaSrc(item: MediaItem, shareToken?: string) {
   if (item._previewUrl) return item._previewUrl
   if (item.mime_type.startsWith('image/') && item.thumbnails?.web) {
-    return item.thumbnails.web
+    return appendToken(item.thumbnails.web, shareToken)
   }
   if (item.storage_path) {
-    return `/api/media/serve/${encodeURIComponent(item.storage_path)}`
+    return appendToken(`/api/media/serve/${encodeURIComponent(item.storage_path)}`, shareToken)
   }
   
   // Ultimate fallback if backend DTO was cached or missing storage_path
-  return item.thumbnails?.large || item.thumbnails?.medium || item.thumbnails?.small || item.thumbnails?.micro || '';
+  const fallback = item.thumbnails?.large || item.thumbnails?.medium || item.thumbnails?.small || item.thumbnails?.micro || '';
+  return appendToken(fallback, shareToken)
 }
 
-function getThumbSrc(item: MediaItem) {
-  return item.thumbnails?.small || item.thumbnails?.micro || item.thumbnails?.medium || ''
+function getThumbSrc(item: MediaItem, shareToken?: string) {
+  const src = item.thumbnails?.small || item.thumbnails?.micro || item.thumbnails?.medium || ''
+  return appendToken(src, shareToken)
 }
 
 // ========== THUMBNAIL STRIP ==========
@@ -69,10 +81,12 @@ function ThumbnailStrip({
   media,
   currentIndex,
   onNavigate,
+  shareToken,
 }: {
   media: MediaItem[]
   currentIndex: number
   onNavigate: (index: number) => void
+  shareToken?: string
 }) {
   const stripRef = useRef<HTMLDivElement>(null)
 
@@ -120,7 +134,7 @@ function ThumbnailStrip({
                 }`}
             >
               <img
-                src={getThumbSrc(item)}
+                src={getThumbSrc(item, shareToken)}
                 alt=""
                 className="w-full h-full object-cover"
                 loading="lazy"
@@ -147,10 +161,13 @@ export default function Lightbox({
   onClose,
   onNavigate,
   onFavorite,
+  onDelete,
+  shareToken,
 }: LightboxProps) {
   const current = media[currentIndex]
   const [showMetadata, setShowMetadata] = useState(false)
   const [showUI, setShowUI] = useState(true)
+  const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false)
 
   // Zoom & transform state
   const [isZoomed, setIsZoomed] = useState(false)
@@ -167,6 +184,7 @@ export default function Lightbox({
     setIsZoomed(false)
     setRotation(0)
     setFlip(false)
+    setShowMobileMoreMenu(false)
   }, [currentIndex, x])
 
   // Keyboard
@@ -186,7 +204,7 @@ export default function Lightbox({
     }
   }, [handleKeyDown])
 
-  // Prevent layout thrashing on mobile: only lock body scroll once on mount
+  // Prevent layout thrashing on mobile: lock body scroll set up
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => {
@@ -200,7 +218,7 @@ export default function Lightbox({
       const idx = currentIndex + offset
       if (idx >= 0 && idx < media.length) {
         const item = media[idx]
-        const src = item.thumbnails?.web || item.thumbnails?.large || getMediaSrc(item)
+        const src = appendToken(item.thumbnails?.web || item.thumbnails?.large || '', shareToken) || getMediaSrc(item, shareToken)
         if (src) { const img = new Image(); img.src = src }
       }
     })
@@ -208,17 +226,24 @@ export default function Lightbox({
 
   const handleDownload = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const auth_token = typeof window !== 'undefined' ? localStorage.getItem('mycloud_token') : null;
-    if (!auth_token) return;
     try {
-      const res = await fetch('/api/auth/download-token', {
-        headers: { 'Authorization': `Bearer ${auth_token}` }
-      });
-      if (!res.ok) throw new Error('Failed to get download token');
-      const data = await res.json();
-
+      let href: string
+      if (shareToken) {
+        // Anonymous public share: use serve_file with token + download flag
+        href = `/api/media/serve/${encodeURIComponent(current.storage_path)}?download=1&token=${shareToken}`
+      } else {
+        // Authenticated user: get short-lived download token
+        const auth_token = typeof window !== 'undefined' ? localStorage.getItem('mycloud_token') : null;
+        if (!auth_token) return;
+        const res = await fetch('/api/auth/download-token', {
+          headers: { 'Authorization': `Bearer ${auth_token}` }
+        });
+        if (!res.ok) throw new Error('Failed to get download token');
+        const data = await res.json();
+        href = `/api/media/${current.id}/download?token=${data.token}`
+      }
       const link = document.createElement('a');
-      link.href = `/api/media/${current.id}/download?token=${data.token}`;
+      link.href = href;
       link.download = current.original_name;
       document.body.appendChild(link);
       link.click();
@@ -277,7 +302,10 @@ export default function Lightbox({
       <div
         ref={containerRef}
         className="flex-1 relative overflow-hidden select-none touch-none"
-        onClick={() => setShowUI(s => !s)}
+        onClick={() => {
+          if (showMobileMoreMenu) setShowMobileMoreMenu(false)
+          else setShowUI(s => !s)
+        }}
       >
         {/* ===== UNIFIED CAROUSEL & ZOOM VIEW ===== */}
         <motion.div
@@ -295,7 +323,7 @@ export default function Lightbox({
               style={{ transform: `translateX(-100%)` }}
             >
               <img
-                src={prev.thumbnails?.web || prev.thumbnails?.large || getMediaSrc(prev)}
+                src={appendToken(prev.thumbnails?.web || prev.thumbnails?.large || '', shareToken) || getMediaSrc(prev, shareToken)}
                 alt={prev.original_name}
                 className={`object-contain ${sizeClass} pointer-events-none`}
                 draggable={false}
@@ -317,25 +345,28 @@ export default function Lightbox({
               <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }} contentStyle={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div
                   className="flex items-center justify-center w-full h-full"
-                  onClick={() => setShowUI(s => !s)}
+                  onClick={() => {
+                    if (showMobileMoreMenu) setShowMobileMoreMenu(false)
+                    else setShowUI(s => !s)
+                  }}
                   style={{ transform: `scaleX(${flip ? -1 : 1}) rotate(${rotation}deg)` }}
                 >
                   {current.mime_type.startsWith('video/') ? (
                     <VideoPlayer
-                      src={`/api/media/serve/${encodeURIComponent(current.storage_path)}`}
-                      poster={current.thumbnails?.web || current.thumbnails?.large}
+                      src={appendToken(`/api/media/serve/${encodeURIComponent(current.storage_path)}`, shareToken)}
+                      poster={appendToken(current.thumbnails?.web || current.thumbnails?.large || '', shareToken)}
                       className={`drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass}`}
                     />
                   ) : (
                     <img
-                      src={getMediaSrc(current)}
+                      src={getMediaSrc(current, shareToken)}
                       alt={current.original_name}
                       className={`object-contain drop-shadow-[0_25px_50px_rgba(0,0,0,0.5)] ${sizeClass} pointer-events-none`}
                       draggable={false}
                       decoding="async"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
-                        const fallback = current.thumbnails?.medium || current.thumbnails?.small || current.thumbnails?.micro;
+                        const fallback = appendToken(current.thumbnails?.medium || current.thumbnails?.small || current.thumbnails?.micro || '', shareToken);
                         if (fallback && target.src !== new URL(fallback, window.location.href).href) {
                           target.src = fallback;
                         }
@@ -354,7 +385,7 @@ export default function Lightbox({
               style={{ transform: `translateX(100%)` }}
             >
               <img
-                src={next.thumbnails?.web || next.thumbnails?.large || getMediaSrc(next)}
+                src={appendToken(next.thumbnails?.web || next.thumbnails?.large || '', shareToken) || getMediaSrc(next, shareToken)}
                 alt={next.original_name}
                 className={`object-contain ${sizeClass} pointer-events-none`}
                 draggable={false}
@@ -372,10 +403,16 @@ export default function Lightbox({
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 className="hidden md:flex absolute top-6 left-6 z-30 pointer-events-none"
               >
-                <div className="flex items-center pointer-events-auto">
+                <div className="flex items-center pointer-events-auto gap-2">
                   <span className="text-white/60 text-sm font-medium bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5 shadow-lg">
                     {currentIndex + 1} / {media.length}
                   </span>
+                  {current.is_encrypted && (
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/20 text-primary border border-primary/30 shadow-lg backdrop-blur-md font-medium text-sm" title="Bảo mật E2EE">
+                      <span className="material-symbols-outlined text-[16px]">lock</span>
+                      E2EE
+                    </span>
+                  )}
                 </div>
               </motion.div>
 
@@ -424,6 +461,15 @@ export default function Lightbox({
                 <button className="p-2 transition-colors ml-1" onClick={(e) => { e.stopPropagation(); onFavorite(current.id) }}>
                   <Heart size={20} fill={current.is_favorite ? '#f59e0b' : 'none'} color={current.is_favorite ? '#f59e0b' : 'white'} />
                 </button>
+                {onDelete && (
+                  <>
+                    <div className="w-px h-6 bg-white/20 mx-1"></div>
+                    <button className="p-2 text-white/80 hover:text-red-400 transition-colors"
+                      onClick={(e) => { e.stopPropagation(); onDelete(current.id) }} title="Xóa khỏi album">
+                      <Trash2 size={20} />
+                    </button>
+                  </>
+                )}
               </motion.div>
 
               {/* MOBILE UNIFIED TOP HEADER */}
@@ -436,24 +482,66 @@ export default function Lightbox({
                     <button className="p-2 text-white hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); onClose() }}>
                       <ChevronLeft size={28} />
                     </button>
-                    <span className="text-white/90 text-sm font-medium ml-1 bg-white/10 px-2 py-1 rounded-md">{currentIndex + 1} / {media.length}</span>
+                    <div className="flex items-center gap-1.5 ml-1">
+                      <span className="text-white/90 text-sm font-medium bg-white/10 px-2 py-1 rounded-md">{currentIndex + 1} / {media.length}</span>
+                      {current.is_encrypted && (
+                        <span className="flex items-center justify-center p-1 bg-primary/20 text-primary border border-primary/30 rounded-md shadow-lg" title="Mã hóa đầu cuối E2EE">
+                          <span className="material-symbols-outlined text-[16px]">lock</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1 text-white/90">
-                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); setFlip(f => !f) }} title="Lật ảnh">
-                      <FlipHorizontal size={22} />
-                    </button>
-                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); setRotation(r => r + 90) }} title="Xoay ảnh">
-                      <RotateCw size={22} />
-                    </button>
+                  <div className="flex items-center gap-1 text-white/90 relative">
                     <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={(e) => { e.stopPropagation(); onFavorite(current.id) }}>
                       <Heart size={22} fill={current.is_favorite ? '#f59e0b' : 'none'} color={current.is_favorite ? '#f59e0b' : 'currentColor'} />
                     </button>
-                    <button className="p-2 hover:bg-white/10 rounded-full transition-colors" onClick={handleDownload}><Download size={22} /></button>
                     <button className={`p-2 rounded-full transition-colors ${showMetadata ? 'bg-primary/80 text-white' : 'hover:bg-white/10'}`}
-                      onClick={(e) => { e.stopPropagation(); setShowMetadata(!showMetadata) }}>
+                      onClick={(e) => { e.stopPropagation(); setShowMetadata(!showMetadata); setShowMobileMoreMenu(false); }}>
                       <Info size={22} />
                     </button>
+                    <button className={`p-2 rounded-full transition-colors ${showMobileMoreMenu ? 'bg-white/20' : 'hover:bg-white/10'}`}
+                      onClick={(e) => { e.stopPropagation(); setShowMobileMoreMenu(!showMobileMoreMenu) }}>
+                      <MoreVertical size={22} />
+                    </button>
+
+                    <AnimatePresence>
+                      {showMobileMoreMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute top-12 right-0 bg-surface/95 backdrop-blur-xl border border-outline-variant/20 rounded-2xl shadow-2xl py-2 min-w-[200px] flex flex-col z-50 pointer-events-auto"
+                        >
+                          <button className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container transition-colors text-on-surface text-sm font-medium"
+                            onClick={(e) => { e.stopPropagation(); handleDownload(e); setShowMobileMoreMenu(false); }}>
+                            <Download size={18} />
+                            Tải xuống
+                          </button>
+                          <button className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container transition-colors text-on-surface text-sm font-medium"
+                            onClick={(e) => { e.stopPropagation(); setRotation(r => r + 90); setShowMobileMoreMenu(false); }}>
+                            <RotateCw size={18} />
+                            Xoay ảnh
+                          </button>
+                          <button className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container transition-colors text-on-surface text-sm font-medium"
+                            onClick={(e) => { e.stopPropagation(); setFlip(f => !f); setShowMobileMoreMenu(false); }}>
+                            <FlipHorizontal size={18} />
+                            Lật ảnh
+                          </button>
+                          {onDelete && (
+                            <>
+                              <div className="h-px bg-outline-variant/10 my-1 mx-2"></div>
+                              <button className="flex items-center gap-3 px-4 py-3 hover:bg-error-container/20 transition-colors text-error text-sm font-medium"
+                                onClick={(e) => { e.stopPropagation(); onDelete(current.id); setShowMobileMoreMenu(false); }}>
+                                <Trash2 size={18} />
+                                Xóa
+                              </button>
+                            </>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
               </motion.div>
@@ -481,7 +569,7 @@ export default function Lightbox({
                 initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
                 className="absolute bottom-2 md:bottom-4 left-1/2 -translate-x-1/2 z-30 max-w-[95vw] md:max-w-[70vw] pointer-events-auto"
               >
-                <ThumbnailStrip media={media} currentIndex={currentIndex} onNavigate={onNavigate} />
+                <ThumbnailStrip media={media} currentIndex={currentIndex} onNavigate={onNavigate} shareToken={shareToken} />
               </motion.div>
             </>
           )}
@@ -514,7 +602,7 @@ export default function Lightbox({
               {/* Photo preview */}
               <div className="w-full bg-black flex items-center justify-center" style={{ maxHeight: '45vh' }}>
                 <img
-                  src={current.thumbnails?.web || current.thumbnails?.large || getMediaSrc(current)}
+                  src={appendToken(current.thumbnails?.web || current.thumbnails?.large || '', shareToken) || getMediaSrc(current, shareToken)}
                   alt={current.original_name}
                   className="w-full object-contain"
                   style={{ maxHeight: '45vh' }}
@@ -560,6 +648,19 @@ export default function Lightbox({
                     {exposure !== '-' && <span>{exposure}</span>}
                   </div>
                 </div>
+
+                {current.is_encrypted && (
+                  <>
+                    <div className="h-px bg-outline-variant/10 w-full"></div>
+                    <div className="flex items-center gap-3 bg-primary/10 text-primary p-3 rounded-xl">
+                      <span className="material-symbols-outlined text-2xl">lock</span>
+                      <div>
+                        <p className="font-semibold text-sm">Được bảo vệ bằng E2EE</p>
+                        <p className="text-xs opacity-80 mt-0.5">Tệp này được mã hóa đầu cuối an toàn</p>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <div className="h-px bg-outline-variant/10 w-full"></div>
 
@@ -678,6 +779,16 @@ export default function Lightbox({
                     <p className="text-on-surface font-semibold">{exposure}</p>
                   </div>
                 </div>
+
+                {current.is_encrypted && (
+                  <div className="flex items-center gap-3 bg-primary/10 text-primary p-4 rounded-2xl">
+                    <span className="material-symbols-outlined text-[28px]">lock</span>
+                    <div>
+                      <p className="font-bold text-sm">Bảo mật ưu tiên</p>
+                      <p className="text-xs mt-0.5 opacity-90 leading-relaxed">Tệp này được mã hóa đầu cuối (E2EE). Chỉ bạn mới có thể xem được nội dung.</p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="h-px bg-surface-container-high w-full my-2"></div>
 

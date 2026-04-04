@@ -141,6 +141,12 @@ const MediaTile = React.memo(function MediaTile({
           <div className="flex items-center gap-1.5 mb-1 md:mb-2">
             <span className="material-symbols-outlined text-[12px] md:text-[16px] text-white/70" data-icon={isVideo ? 'videocam' : 'photo_camera'}>{isVideo ? 'videocam' : 'photo_camera'}</span>
             <span className="text-[10px] md:text-xs font-medium text-white/70 uppercase tracking-wider">{isVideo ? 'Video' : 'Ảnh'}</span>
+            {item.is_encrypted && (
+              <span className="flex items-center gap-0.5 ml-1 px-1.5 py-0.5 rounded bg-white/20 text-white" title="Bảo mật E2EE">
+                <span className="material-symbols-outlined text-[10px] md:text-[12px]">lock</span>
+                <span className="text-[8px] md:text-[10px] font-bold uppercase tracking-wider">E2EE</span>
+              </span>
+            )}
           </div>
           <p className="font-bold text-sm md:text-2xl truncate max-w-[500px]">{item.original_name}</p>
           <p className="text-xs md:text-sm opacity-80 mt-0.5 flex items-center gap-1">
@@ -149,9 +155,12 @@ const MediaTile = React.memo(function MediaTile({
           </p>
         </div>
       ) : viewMode === 'timeline' && idx >= 3 ? null : viewMode !== 'grid-small' && (
-        <div className={`absolute pointer-events-none text-white transform translate-y-4 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all ${viewMode === 'grid-medium' ? 'bottom-3 left-3' : 'bottom-6 left-6'}`}>
-          <p className={`font-bold truncate max-w-[200px] ${viewMode === 'grid-medium' ? 'text-sm' : 'text-lg'}`}>{item.original_name}</p>
-          <p className={`opacity-80 ${viewMode === 'grid-medium' ? 'text-xs' : 'text-sm'}`}>{new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+        <div className={`absolute pointer-events-none text-white transform translate-y-4 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all w-full pr-4 ${viewMode === 'grid-medium' ? 'bottom-3 left-3 flex flex-col gap-0.5' : 'bottom-4 left-4 md:bottom-6 md:left-6 flex flex-col gap-1'}`}>
+          <div className="flex items-center gap-1.5 min-w-0 w-full">
+            {item.is_encrypted && <span className="material-symbols-outlined text-white/90 text-[14px] md:text-[16px] drop-shadow-md shrink-0" title="Bảo mật E2EE">lock</span>}
+            <p className={`font-bold truncate w-full ${viewMode === 'grid-medium' ? 'text-xs md:text-sm' : 'text-sm md:text-lg'} leading-tight`}>{item.original_name}</p>
+          </div>
+          <p className={`opacity-80 ${viewMode === 'grid-medium' ? 'text-[10px] md:text-xs' : 'text-xs md:text-sm'}`}>{new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
         </div>
       )}
     </div>
@@ -163,6 +172,7 @@ const MediaTile = React.memo(function MediaTile({
     && prev.item.is_favorite === next.item.is_favorite
     && prev.item.status === next.item.status
     && prev.item._previewUrl === next.item._previewUrl
+    && prev.item.is_encrypted === next.item.is_encrypted
     && prev.viewMode === next.viewMode
     && prev.idx === next.idx
 })

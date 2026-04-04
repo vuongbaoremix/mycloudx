@@ -159,6 +159,12 @@ export default function PublicShare() {
               if (viewMode === 'grid-small') thumbSrc = item.thumbnails?.small || item.thumbnails?.medium;
               else if (viewMode === 'grid-large') thumbSrc = item.thumbnails?.large || item.thumbnails?.medium || item.thumbnails?.small || item.thumbnails?.micro;
 
+              // Append share token for encrypted media access
+              if (thumbSrc && token) {
+                const sep = thumbSrc.includes('?') ? '&' : '?'
+                thumbSrc = `${thumbSrc}${sep}token=${token}`
+              }
+
               const isVideo = item.mime_type?.startsWith('video/')
               if (!thumbSrc && isVideo) thumbSrc = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnPg==';
 
@@ -202,6 +208,7 @@ export default function PublicShare() {
           onClose={() => setLightboxIndex(null)}
           onNavigate={setLightboxIndex}
           onFavorite={() => { }}
+          shareToken={token}
         />
       )}
     </div>
