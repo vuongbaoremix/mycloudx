@@ -17,5 +17,6 @@ pub struct Album {
 pub struct AlbumMedia {
     pub album_id: String,
     pub media_id: String,
+    pub added_by: Option<String>,
     pub added_at: DateTime<Utc>,
 }
