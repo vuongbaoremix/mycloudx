@@ -50,12 +50,20 @@ impl CloudStoreProvider {
 #[async_trait::async_trait]
 impl StorageProvider for CloudStoreProvider {
     async fn upload(&self, data: &[u8], path: &str) -> Result<StorageResult> {
+        self.upload_encrypted(data, path, None).await
+    }
+
+    async fn upload_encrypted(&self, data: &[u8], path: &str, encryption_key: Option<&str>) -> Result<StorageResult> {
         let url = self.file_url(path);
-        let req = self.build_request(
+        let mut req = self.build_request(
             self.client.put(&url)
                 .header("Content-Type", "application/octet-stream")
                 .body(data.to_vec()),
         );
+
+        if let Some(key) = encryption_key {
+            req = req.header("X-Encryption-Key", key);
+        }
 
         let t_req = std::time::Instant::now();
         let res = req.send().await.map_err(|e| anyhow!("CloudStore upload failed: {}", e))?;
@@ -78,8 +86,17 @@ impl StorageProvider for CloudStoreProvider {
     }
 
     async fn read(&self, path: &str) -> Result<Vec<u8>> {
+        self.read_encrypted(path, None).await
+    }
+
+    async fn read_encrypted(&self, path: &str, encryption_key: Option<&str>) -> Result<Vec<u8>> {
         let url = self.file_url(path);
-        let req = self.build_request(self.client.get(&url));
+        let mut req = self.build_request(self.client.get(&url));
+
+        if let Some(key) = encryption_key {
+            req = req.header("X-Encryption-Key", key);
+        }
+
         let res = req.send().await.map_err(|e| anyhow!("CloudStore read failed: {}", e))?;
 
         if !res.status().is_success() {
@@ -150,6 +167,37 @@ impl StorageProvider for CloudStoreProvider {
         };
 
         self.upload(buffer, &thumb_path).await?;
+        Ok(thumb_path)
+    }
+
+    async fn upload_thumbnail_encrypted(
+        &self,
+        buffer: &[u8],
+        base_path: &str,
+        size: ThumbnailSize,
+        encryption_key: Option<&str>,
+    ) -> Result<String> {
+        let parts: Vec<&str> = base_path.split('/').collect();
+        let filename = parts.last().unwrap_or(&"file");
+        let name_no_ext = Path::new(filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+
+        let parent_dir = if parts.len() > 1 {
+            parts[..parts.len() - 1].join("/")
+        } else {
+            "".to_string()
+        };
+
+        let thumb_path = if parent_dir.ends_with(name_no_ext) {
+            format!("{}/{}.webp", parent_dir, size.as_str())
+        } else {
+            let user_id = parts.first().unwrap_or(&"unknown");
+            format!("{}/.thumbnails/{}/{}.webp", user_id, size.as_str(), name_no_ext)
+        };
+
+        self.upload_encrypted(buffer, &thumb_path, encryption_key).await?;
         Ok(thumb_path)
     }
 

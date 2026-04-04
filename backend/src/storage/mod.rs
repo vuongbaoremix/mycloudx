@@ -46,8 +46,20 @@ pub trait StorageProvider: Send + Sync {
     /// Upload file data to the given path
     async fn upload(&self, data: &[u8], path: &str) -> Result<StorageResult>;
 
+    /// Upload file data with optional encryption key
+    async fn upload_encrypted(&self, data: &[u8], path: &str, encryption_key: Option<&str>) -> Result<StorageResult> {
+        let _ = encryption_key; // Default: ignore key
+        self.upload(data, path).await
+    }
+
     /// Read file at path
     async fn read(&self, path: &str) -> Result<Vec<u8>>;
+
+    /// Read file with optional encryption key for decryption
+    async fn read_encrypted(&self, path: &str, encryption_key: Option<&str>) -> Result<Vec<u8>> {
+        let _ = encryption_key; // Default: ignore key
+        self.read(path).await
+    }
 
     /// Get the URL for serving a file
     fn get_url(&self, path: &str) -> String;
@@ -68,6 +80,18 @@ pub trait StorageProvider: Send + Sync {
         base_path: &str,
         size: ThumbnailSize,
     ) -> Result<String>;
+
+    /// Upload a thumbnail with optional encryption key
+    async fn upload_thumbnail_encrypted(
+        &self,
+        buffer: &[u8],
+        base_path: &str,
+        size: ThumbnailSize,
+        encryption_key: Option<&str>,
+    ) -> Result<String> {
+        let _ = encryption_key; // Default: ignore key
+        self.upload_thumbnail(buffer, base_path, size).await
+    }
 
     /// Get thumbnail URL
     fn get_thumbnail_url(&self, base_path: &str, size: ThumbnailSize) -> String;

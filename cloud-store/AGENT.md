@@ -54,7 +54,7 @@ Client ──PUT /api/files/{provider}/{path}──→ [Axum Server]
 | `error.rs` | `ApiError` — converts `CloudStoreError` → HTTP status codes (including 401 Unauthorized). |
 | `middleware/auth.rs` | API key auth middleware. Extracts `Authorization: Bearer <key>`. Skips auth if key not configured. |
 | `metrics.rs` | `AppMetrics` — lock-free atomic counters. Renders Prometheus exposition format. |
-| `routes/files.rs` | `upload_file` (PUT, streaming body→disk), `download_file` (GET, streams from disk via ReaderStream — constant RAM; auto-fetches from cloud if evicted), `head_file` (HEAD), `delete_file` (DELETE, also deletes from cloud), `list_files` (GET), `file_status` (GET). |
+| `routes/files.rs` | `upload_file` (PUT, streaming body→disk), `download_file` (GET, dual-path proxy: if no `Range` → *Tee Stream* (proxies raw to client & background caches to disk), if `Range` → direct proxy & spawns background download into cache). `head_file` (HEAD), `delete_file` (DELETE, also deletes from cloud), `list_files` (GET), `file_status` (GET). |
 | `routes/auth.rs` | `gdrive_auth_redirect` (GET → 302 redirect to Google), `gdrive_auth_callback` (GET → exchange code, save token), `gdrive_auth_status` (GET → check token cache). |
 | `routes/health.rs` | `health_check` (GET /api/health), `stats` (GET /api/stats with status breakdown). |
 
@@ -84,6 +84,13 @@ GET    /metrics                         Prometheus metrics
 7. Worker picks up job → `GDriveProvider::upload()` reads from disk path
 8. On success: meta updated to `Synced` + `cloud_url` set
 9. On failure: exponential backoff retry (up to `retry_max`)
+
+## Data Flow: Download (Evicted File)
+1. Client HTTP GET `download_file` handler.
+2. Checks Cache: File not on disk.
+3. Checks `AppState::active_downloads` global lock to see if file is currently downloading.
+4. **Has Range Header**: Client wants to seek video. Server fires a `CloudProvider::proxy_stream()` directly forwarding the Range to GDrive, achieving $O(1)$ latency. Spawns background task to cache the whole file. 
+5. **No Range Header**: Regular playback. Server creates a `Tee Stream` via Tokio channels (`mpsc`). The data comes from `CloudProvider::proxy_stream()` and is duplicated chunk-by-chunk into `axum::body::Body` (client HTTP stream) and `CacheEngine::store_stream()` (disk write) concurrently. This provides instant playback and cache population.
 
 ## File Layout on Disk
 ```
@@ -120,6 +127,7 @@ GET    /metrics                         Prometheus metrics
 - **TLS**: `hyper-rustls` with `webpki-roots` (CA certs bundled in binary, no system certs needed)
 - **Path validation**: `PathId` rejects traversal (`..`), null bytes, component > 255 bytes
 - **Auth**: API key via `Authorization: Bearer <key>` header. If `CLOUDSTORE_API_KEY` not set, all requests pass through
+- **Encryption**: SSE-C (Server-Side Encryption with Customer Key). Cho phép mã hoá upload và giải mã download on-the-fly sử dụng ciphers dòng ChaCha20 với hỗ trợ O(1) seek `Range`. Key được cung cấp qua `X-Encryption-Key` HTTP header.
 - **Cache eviction**: LRU eviction of `Synced` files when cache exceeds `CLOUDSTORE_CACHE_MAX_SIZE`. Only data files deleted, `.meta.json` preserved
 - **GDrive overwrite**: Uses `files().update()` to preserve file ID, share links, and revision history
 - **Startup recovery**: On boot, re-enqueues files with status `Cached` or `SyncFailed` for sync retry

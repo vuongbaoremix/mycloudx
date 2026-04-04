@@ -32,6 +32,7 @@
 - **Optional auth** — nếu không set `CLOUDSTORE_API_KEY`, auth bị disable (backwards compatible)
 - **Path validation** — chặn path traversal (`..`), null bytes, component > 255 bytes
 - **CORS** — permissive CORS cho cross-origin access
+- **SSE-C Encryption** — Mã hóa ChaCha20 luồng stream với tuỳ chọn truyền `X-Encryption-Key` HTTP Header
 
 ### Monitoring & Operations
 - **Prometheus metrics** — `/metrics` endpoint với atomic counters: uploads, downloads, deletes, bytes transferred
@@ -126,6 +127,7 @@ Upload a file using streaming binary body. File is cached locally and queued for
 |-----------|----------|----------|-------------|
 | `provider` | path | yes | Cloud provider name (e.g. `gdrive`) |
 | `path` | path | yes | Remote file path (e.g. `photos/2026/photo.jpg`) |
+| `X-Encryption-Key` | header | no | Mã hoá nội dung bằng ChaCha20 với chuỗi key này |
 
 **Request Body**: Raw binary file content (`application/octet-stream`)
 
@@ -146,6 +148,7 @@ Upload a file using streaming binary body. File is cached locally and queued for
 ```bash
 curl -X PUT \
   -H "Authorization: Bearer my-api-key" \
+  -H "X-Encryption-Key: my-secret-encryption-key-that-only-i-know" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @photo.jpg \
   http://localhost:8080/api/files/gdrive/photos/2026/photo.jpg
@@ -160,17 +163,21 @@ GET /api/files/{provider}/{path}
 ```
 
 Download a file. Serves from local cache if available; if evicted, transparently fetches from cloud, re-caches, and streams back.
+Supports HTTP `Range` requests (e.g., `Range: bytes=0-1024`) for partial downloads/video streaming.
+Cung cấp `X-Encryption-Key` header nếu file đã được upload kèm tuỳ chọn `X-Encryption-Key`. Nếu không cung cấp hoặc cung cấp sai key, request sẽ bị từ chối với status 401.
 
-**Response** `200 OK`:
-- **Body**: Raw binary file content
+**Response** `200 OK` (hoặc `206 Partial Content` nếu dùng Range header):
+- **Body**: Raw binary file content (or requested chunk)
 - **Headers**:
   - `Content-Type`: MIME type of the file
   - `Content-Disposition`: `attachment; filename="photo.jpg"`
-  - `Content-Length`: File size in bytes
+  - `Content-Length`: File size in bytes (or chunk size)
+  - `Accept-Ranges`: `bytes`
 
 **Example**:
 ```bash
 curl -H "Authorization: Bearer my-api-key" \
+  -H "X-Encryption-Key: my-secret-encryption-key-that-only-i-know" \
   -o photo.jpg \
   http://localhost:8080/api/files/gdrive/photos/2026/photo.jpg
 ```
