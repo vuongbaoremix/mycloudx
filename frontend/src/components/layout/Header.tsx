@@ -1,6 +1,7 @@
 import { Menu } from 'lucide-react'
 import SearchBar from './SearchBar'
 import AccountMenu from './AccountMenu'
+import NotificationsMenu from './NotificationsMenu'
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -20,7 +21,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
           <SearchBar />
         </div>
       </div>
-      <div className="flex items-center">
+      <div className="flex items-center gap-1 md:gap-2">
+        <NotificationsMenu />
         <AccountMenu />
       </div>
     </header>
