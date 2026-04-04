@@ -20,8 +20,8 @@ impl CacheIndex {
         let res = sqlx::query(
             "INSERT INTO cache_meta (
                 path_id, original_name, content_hash, size_bytes, mime_type, status,
-                cloud_url, cloud_provider, created_at, synced_at, retry_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cloud_url, cloud_provider, is_encrypted, encryption_iv, key_verification_hash, created_at, synced_at, retry_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(path_id) DO UPDATE SET
                 original_name = excluded.original_name,
                 content_hash = excluded.content_hash,
@@ -30,6 +30,9 @@ impl CacheIndex {
                 status = excluded.status,
                 cloud_url = excluded.cloud_url,
                 cloud_provider = excluded.cloud_provider,
+                is_encrypted = excluded.is_encrypted,
+                encryption_iv = excluded.encryption_iv,
+                key_verification_hash = excluded.key_verification_hash,
                 created_at = excluded.created_at,
                 synced_at = excluded.synced_at,
                 retry_count = excluded.retry_count"
@@ -42,6 +45,9 @@ impl CacheIndex {
         .bind(&status_str)
         .bind(&meta.cloud_url)
         .bind(&meta.cloud_provider)
+        .bind(meta.is_encrypted)
+        .bind(&meta.encryption_iv)
+        .bind(&meta.key_verification_hash)
         .bind(&meta.created_at)
         .bind(&meta.synced_at)
         .bind(meta.retry_count as i64)
@@ -205,6 +211,9 @@ impl CacheIndex {
             status,
             cloud_url: row.try_get("cloud_url").ok()?,
             cloud_provider: row.try_get("cloud_provider").ok()?,
+            is_encrypted: row.try_get("is_encrypted").unwrap_or(false),
+            encryption_iv: row.try_get("encryption_iv").ok()?,
+            key_verification_hash: row.try_get("key_verification_hash").ok()?,
             created_at: row.try_get("created_at").ok()?,
             synced_at: row.try_get("synced_at").ok()?,
             retry_count: row.try_get::<i64, _>("retry_count").ok()? as u32,

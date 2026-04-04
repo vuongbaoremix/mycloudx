@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import api from '../api/client'
 import Lightbox from '../components/gallery/Lightbox'
 import { SkeletonGrid } from '../components/ui/Skeleton'
@@ -31,7 +32,11 @@ export default function Gallery({ title = "Photos", filterMimeType }: GalleryPro
   } = useMediaSelection(media)
 
   const [viewMode, setViewMode] = useState<ViewMode>('timeline')
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  
+  const [searchParams, setSearchParams] = useSearchParams()
+  const previewId = searchParams.get('preview')
+  // We use >= 0 instead of !== null for visibility check below
+  const lightboxIndex = previewId ? media.findIndex(m => m.id === previewId) : -1
 
   // Drag-to-select (desktop only)
   const galleryRef = useRef<HTMLDivElement>(null)
@@ -74,15 +79,18 @@ export default function Gallery({ title = "Photos", filterMimeType }: GalleryPro
   const [albums, setAlbums] = useState<any[]>([])
   const [showShareModal, setShowShareModal] = useState(false)
 
-  const handleItemClick = useCallback((globalIndex: number, itemId: string, e: React.MouseEvent) => {
+  const handleItemClick = useCallback((_globalIndex: number, itemId: string, e: React.MouseEvent) => {
     if (selectionMode) {
       toggleSelection(itemId, e)
     } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
       toggleSelection(itemId, e)
     } else {
-      setLightboxIndex(globalIndex)
+      setSearchParams(prev => {
+        prev.set('preview', itemId)
+        return prev
+      })
     }
-  }, [selectionMode, toggleSelection])
+  }, [selectionMode, toggleSelection, setSearchParams])
 
   const { confirm } = useConfirm()
 
@@ -190,12 +198,22 @@ export default function Gallery({ title = "Photos", filterMimeType }: GalleryPro
       />
 
       {/* Lightbox */}
-      {lightboxIndex !== null && (
+      {lightboxIndex >= 0 && (
         <Lightbox
           media={media}
           currentIndex={lightboxIndex}
-          onClose={() => setLightboxIndex(null)}
-          onNavigate={setLightboxIndex}
+          onClose={() => {
+            setSearchParams(prev => {
+              prev.delete('preview')
+              return prev
+            })
+          }}
+          onNavigate={(targetIndex) => {
+            setSearchParams(prev => {
+              prev.set('preview', media[targetIndex].id)
+              return prev
+            })
+          }}
           onFavorite={(id) => handleToggleFavorite(id)}
           onDelete={handleDelete}
         />

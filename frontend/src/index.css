@@ -335,6 +335,13 @@ a:hover {
     @apply right-4;
   }
 
+  /* ===== Global FABs ===== */
+  body.selection-mode-active .upload-fab {
+    transform: translateY(150px) !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
   /* ===== Upload Zone ===== */
   .upload-zone {
     @apply border-2 border-dashed border-outline-variant/60 rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 bg-surface-container-lowest hover:border-primary hover:bg-primary/5 [&.dragging]:border-primary [&.dragging]:bg-primary/5;

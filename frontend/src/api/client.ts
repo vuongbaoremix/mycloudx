@@ -55,7 +55,15 @@ class ApiClient {
     }
 
     if (res.status === 204) return undefined as T;
-    return res.json();
+    
+    const text = await res.text();
+    if (!text) return undefined as T;
+    
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text as unknown as T;
+    }
   }
 
   // Auth
@@ -325,6 +333,10 @@ class ApiClient {
     return this.request<any>('/user/profile');
   }
 
+  async searchUsers(q: string) {
+    return this.request<any[]>(`/user/search?q=${encodeURIComponent(q)}`);
+  }
+
   async updateProfile(data: any) {
     return this.request<any>('/user/profile', {
       method: 'PUT',
@@ -333,13 +345,56 @@ class ApiClient {
   }
 
   async changePassword(currentPassword: string, newPassword: string) {
-    return this.request<void>('/user/password', {
+    const data = await this.request<{ token: string }>('/user/password', {
       method: 'PUT',
       body: JSON.stringify({
         current_password: currentPassword,
         new_password: newPassword,
       }),
     });
+    // Backend re-issues JWT with re-wrapped master key
+    if (data?.token) {
+      this.setToken(data.token);
+    }
+    return data;
+  }
+
+  // Encryption
+  async getEncryptionStatus() {
+    return this.request<{ enabled: boolean }>('/encryption/status');
+  }
+
+  async enableEncryption(password: string) {
+    const data = await this.request<{ enabled: boolean; recovery_key: string; token: string }>('/encryption/enable', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+    if (data?.token) {
+      this.setToken(data.token);
+    }
+    return data;
+  }
+
+  async disableEncryption(password: string) {
+    const data = await this.request<{ enabled: boolean; token: string }>('/encryption/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+    if (data?.token) {
+      this.setToken(data.token);
+    }
+    return data;
+  }
+
+  async recoverEncryption(recoveryKey: string, password: string) {
+    const data = await this.request<{ recovered: boolean; token: string }>('/encryption/recover', {
+      method: 'POST',
+      body: JSON.stringify({ recovery_key: recoveryKey, password }),
+    });
+    if (data?.token) {
+      this.setToken(data.token);
+    }
+    return data;
   }
 
   // Albums
@@ -382,6 +437,45 @@ class ApiClient {
       body: JSON.stringify({ media_ids: mediaIds }),
     });
   }
+
+  // Collaborators
+  async getCollaborators(albumId: string) {
+    return this.request<any[]>(`/albums/${albumId}/collaborators`);
+  }
+
+  async addCollaborator(albumId: string, email: string, role: string, canDownload: boolean) {
+    return this.request<any>(`/albums/${albumId}/collaborators`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role, can_download: canDownload }),
+    });
+  }
+
+  async updateCollaborator(albumId: string, userId: string, role: string, canDownload: boolean) {
+    return this.request<any>(`/albums/${albumId}/collaborators/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role, can_download: canDownload }),
+    });
+  }
+
+  async removeCollaborator(albumId: string, userId: string) {
+    return this.request<void>(`/albums/${albumId}/collaborators/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Notifications
+  async getNotifications() {
+    return this.request<any[]>('/notifications');
+  }
+
+  async markNotificationRead(id: string) {
+    return this.request<void>(`/notifications/${id}/read`, { method: 'PUT' });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request<void>('/notifications/read-all', { method: 'PUT' });
+  }
+
 
   // Admin
   async getStats() {

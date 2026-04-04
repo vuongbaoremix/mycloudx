@@ -17,7 +17,7 @@ import Explorer from './pages/Explorer'
 import Mosaic from './pages/Mosaic'
 import PublicShare from './pages/PublicShare'
 import Layout from './components/layout/Layout'
-import { ReloadPrompt } from './components/pwa/ReloadPrompt'
+// import { ReloadPrompt } from './components/pwa/ReloadPrompt'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!api.isAuthenticated()) return <Navigate to="/login" replace />
@@ -27,7 +27,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <>
-      <ReloadPrompt />
+      {/* <ReloadPrompt /> */}
       <Toaster
         position="bottom-center"
         richColors

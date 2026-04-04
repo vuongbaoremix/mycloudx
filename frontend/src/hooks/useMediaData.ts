@@ -17,6 +17,7 @@ export interface MediaItem {
   blur_hash?: string
   aspect_ratio: number
   is_favorite: boolean
+  is_encrypted?: boolean
   storage_path: string
   created_at: string
   status?: string

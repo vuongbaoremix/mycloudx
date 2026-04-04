@@ -70,14 +70,24 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           ))}
 
           {isAdmin && (
-            <NavLink
-              to="/dashboard"
-              onClick={onClose}
-              className={(props) => navLinkClass(props, 'mt-auto mb-2')}
-            >
-              <span className="material-symbols-outlined" data-icon="monitoring">monitoring</span>
-              <span className="font-headline text-sm font-medium">Bảng điều khiển</span>
-            </NavLink>
+            <>
+              <NavLink
+                to="/dashboard"
+                onClick={onClose}
+                className={(props) => navLinkClass(props, 'mt-auto mb-2')}
+              >
+                <span className="material-symbols-outlined" data-icon="monitoring">monitoring</span>
+                <span className="font-headline text-sm font-medium">Bảng điều khiển</span>
+              </NavLink>
+              <NavLink
+                to="/admin"
+                onClick={onClose}
+                className={(props) => navLinkClass(props, 'mb-2')}
+              >
+                <span className="material-symbols-outlined" data-icon="manage_accounts">manage_accounts</span>
+                <span className="font-headline text-sm font-medium">Quản lý User</span>
+              </NavLink>
+            </>
           )}
         </nav>
         <div className="px-4 py-6 border-t border-outline-variant/10">

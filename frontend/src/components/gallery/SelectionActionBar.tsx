@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 
 interface SelectionActionBarProps {
   selectedItems: Set<string>
@@ -13,6 +14,11 @@ export default function SelectionActionBar({
   selectedItems, mediaCount, cancelSelection, selectAll,
   onMultiDelete, onOpenAlbumModal, onOpenShareModal,
 }: SelectionActionBarProps) {
+  useEffect(() => {
+    document.body.classList.add('selection-mode-active')
+    return () => document.body.classList.remove('selection-mode-active')
+  }, [])
+
   if (selectedItems.size === 0) return null
 
   return (

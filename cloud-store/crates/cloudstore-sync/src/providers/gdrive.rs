@@ -28,6 +28,7 @@ pub struct GDriveProvider {
     /// In-memory cache: "parent_id/folder_name" → folder_id.
     /// Prevents duplicate folder creation from concurrent uploads.
     folder_cache: Arc<Mutex<HashMap<String, String>>>,
+    proxy_client: google_drive3::hyper_util::client::legacy::Client<HttpsConnector<HttpConnector>, http_body_util::Empty<bytes::Bytes>>,
 }
 
 impl GDriveProvider {
@@ -96,8 +97,19 @@ impl GDriveProvider {
 
         info!(folder_id = folder_id, path_prefix = ?path_prefix, "Google Drive provider initialized (OAuth2)");
 
+        let proxy_connector = google_drive3::hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_only()
+            .enable_http2()
+            .build();
+        let proxy_client = google_drive3::hyper_util::client::legacy::Client::builder(
+            google_drive3::hyper_util::rt::TokioExecutor::new(),
+        )
+        .build(proxy_connector);
+
         Ok(Self {
             hub,
+            proxy_client,
             folder_id: folder_id.to_string(),
             path_prefix,
             folder_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -308,7 +320,11 @@ impl CloudProvider for GDriveProvider {
         Ok(cloud_url)
     }
 
-    async fn download(&self, cloud_url: &str) -> Result<Vec<u8>, CloudStoreError> {
+    async fn proxy_stream(
+        &self,
+        cloud_url: &str,
+        request_headers: &hyper::HeaderMap,
+    ) -> Result<hyper::Response<hyper::body::Incoming>, CloudStoreError> {
         let file_id = if cloud_url.contains("drive.google.com") {
             cloud_url
                 .split("/d/")
@@ -319,32 +335,50 @@ impl CloudProvider for GDriveProvider {
             cloud_url
         };
 
-        let response = self.hub
-            .files()
-            .get(file_id)
-            .param("alt", "media")
-            .doit()
+        // Get the OAuth2 token. In yup_oauth2, auth.get_token() provides the authenticator.
+        let token_opt = self.hub
+            .auth
+            .get_token(&["https://www.googleapis.com/auth/drive"])
             .await
             .map_err(|e| CloudStoreError::ProviderError {
                 provider: "gdrive".into(),
-                message: format!("Download failed for '{}': {}", file_id, e),
+                message: format!("Failed to get OAuth token: {}", e),
             })?;
 
-        use http_body_util::BodyExt;
-        let body_bytes = response
-            .0
-            .into_body()
-            .collect()
-            .await
-            .map_err(|e| CloudStoreError::ProviderError {
-                provider: "gdrive".into(),
-                message: format!("Failed to read body: {}", e),
-            })?
-            .to_bytes()
-            .to_vec();
+        let token = token_opt.ok_or_else(|| CloudStoreError::ProviderError {
+            provider: "gdrive".into(),
+            message: "OAuth token was None".into(),
+        })?;
 
-        info!(file_id = file_id, size = body_bytes.len(), "Downloaded from Google Drive");
-        Ok(body_bytes)
+        let url = format!(
+            "https://www.googleapis.com/drive/v3/files/{}?alt=media",
+            file_id
+        );
+
+        let mut req_builder = hyper::Request::builder()
+            .method(hyper::Method::GET)
+            .uri(url)
+            .header(hyper::header::AUTHORIZATION, format!("Bearer {}", token));
+
+        // Forward Range headers
+        if let Some(range) = request_headers.get(hyper::header::RANGE) {
+            req_builder = req_builder.header(hyper::header::RANGE, range);
+        }
+        if let Some(if_range) = request_headers.get(hyper::header::IF_RANGE) {
+            req_builder = req_builder.header(hyper::header::IF_RANGE, if_range);
+        }
+
+        let req = req_builder
+            .body(http_body_util::Empty::<bytes::Bytes>::new())
+            .unwrap();
+
+        let response = self.proxy_client.request(req).await.map_err(|e| CloudStoreError::ProviderError {
+            provider: "gdrive".into(),
+            message: format!("Failed to proxy stream: {}", e),
+        })?;
+
+        tracing::info!(file_id = file_id, status = response.status().as_u16(), "Proxied stream from Google Drive");
+        Ok(response)
     }
 
     async fn delete(&self, cloud_url: &str) -> Result<(), CloudStoreError> {

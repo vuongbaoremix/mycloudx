@@ -161,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
         provider,
         api_key,
         metrics,
+        active_downloads: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
     };
 
     // Build router.

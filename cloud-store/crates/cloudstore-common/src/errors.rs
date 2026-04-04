@@ -35,4 +35,7 @@ pub enum CloudStoreError {
 
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
 }

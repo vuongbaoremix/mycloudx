@@ -161,6 +161,18 @@ pub struct FileMeta {
 
     /// Cloud provider name.
     pub cloud_provider: String,
+    
+    /// Whether the file is encrypted via SSE-C with ChaCha20
+    #[serde(default)]
+    pub is_encrypted: bool,
+    
+    /// Initialization Vector (IV/Nonce) for the stream cipher
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_iv: Option<String>,
+    
+    /// SHA-256 hash of the plain-text key for verification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_verification_hash: Option<String>,
 
     /// Creation timestamp.
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -190,6 +202,9 @@ impl FileMeta {
             status: FileStatus::Cached,
             cloud_url: None,
             cloud_provider,
+            is_encrypted: false,
+            encryption_iv: None,
+            key_verification_hash: None,
             created_at: chrono::Utc::now(),
             synced_at: None,
             retry_count: 0,

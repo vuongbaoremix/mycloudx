@@ -14,4 +14,6 @@ pub struct AppState {
     pub api_key: Option<String>,
     /// Application metrics.
     pub metrics: AppMetrics,
+    /// Tracks active background downloads to prevent duplicate jobs for the same file.
+    pub active_downloads: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }

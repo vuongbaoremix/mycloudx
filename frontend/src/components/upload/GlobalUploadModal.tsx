@@ -254,7 +254,7 @@ export default function GlobalUploadModal() {
     const isBusy = (totalCount > 0 && doneCount < totalCount) && isMinimized;
     return (
       <div 
-        className={`fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-6 md:bottom-10 md:right-10 z-[90] flex items-center shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer bg-gradient-to-br from-primary to-primary-container text-on-primary overflow-hidden ${isBusy ? 'rounded-full pr-6 pl-4 h-14 md:h-16 shadow-primary/40' : 'w-14 h-14 md:w-16 md:h-16 justify-center rounded-full shadow-primary/30'}`}
+        className={`fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-6 md:bottom-10 md:right-10 z-[90] flex items-center shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer bg-gradient-to-br from-primary to-primary-container text-on-primary overflow-hidden ${isBusy ? 'rounded-full pr-6 pl-4 h-14 md:h-16 shadow-primary/40' : 'w-14 h-14 md:w-16 md:h-16 justify-center rounded-full shadow-primary/30'} upload-fab`}
         onClick={() => {
           setIsOpen(true);
           setIsMinimized(false);

@@ -261,7 +261,7 @@ export default function VirtualizedMediaGrid({
   return (
     <div
       ref={containerRef}
-      className={`${viewMode === 'timeline' ? 'timeline-connector' : ''}`}
+      className={`select-none ${viewMode === 'timeline' ? 'timeline-connector' : ''}`}
     >
       {/* Floating sticky header overlay */}
       {stickyHeader && (

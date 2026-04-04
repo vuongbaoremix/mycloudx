@@ -27,8 +27,12 @@ pub trait CloudProvider: Send + Sync {
         mime_type: &str,
     ) -> Result<String, CloudStoreError>;
 
-    /// Download file from cloud by cloud URL/ID.
-    async fn download(&self, cloud_url: &str) -> Result<Vec<u8>, CloudStoreError>;
+    /// Proxy a stream from the cloud, passing headers like Range
+    async fn proxy_stream(
+        &self,
+        cloud_url: &str,
+        request_headers: &hyper::HeaderMap,
+    ) -> Result<hyper::Response<hyper::body::Incoming>, CloudStoreError>;
 
     /// Delete file from cloud.
     async fn delete(&self, cloud_url: &str) -> Result<(), CloudStoreError>;

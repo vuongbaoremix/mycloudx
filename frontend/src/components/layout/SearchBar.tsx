@@ -31,6 +31,8 @@ export default function SearchBar() {
     <div className="relative w-full max-w-md group">
       <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant group-focus-within:text-primary transition-colors" data-icon="search">search</span>
       <input 
+        name="search"
+        autoComplete="off"
         className="w-full bg-surface-container/50 border border-outline-variant/30 rounded-full pl-12 pr-4 py-2.5 text-sm transition-all outline-none placeholder:text-on-surface-variant/60 font-body focus:bg-surface-container-lowest focus:border-primary/50 focus:shadow-[0_0_20px_rgba(79,70,229,0.15)] focus:ring-1 focus:ring-primary/30" 
         placeholder="Tìm kiếm kỷ niệm..." 
         type="text"

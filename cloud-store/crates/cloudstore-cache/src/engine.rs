@@ -69,6 +69,9 @@ impl CacheEngine {
                 status TEXT NOT NULL,
                 cloud_url TEXT,
                 cloud_provider TEXT NOT NULL,
+                is_encrypted BOOLEAN NOT NULL DEFAULT 0,
+                encryption_iv TEXT,
+                key_verification_hash TEXT,
                 created_at TEXT NOT NULL,
                 synced_at TEXT,
                 retry_count INTEGER NOT NULL DEFAULT 0
@@ -77,6 +80,11 @@ impl CacheEngine {
         .execute(&pool)
         .await
         .map_err(|e| CloudStoreError::ProviderError { provider: "sqlite".into(), message: e.to_string() })?;
+
+        // Add missing columns if upgrading an existing database
+        let _ = sqlx::query("ALTER TABLE cache_meta ADD COLUMN is_encrypted BOOLEAN NOT NULL DEFAULT 0").execute(&pool).await;
+        let _ = sqlx::query("ALTER TABLE cache_meta ADD COLUMN encryption_iv TEXT").execute(&pool).await;
+        let _ = sqlx::query("ALTER TABLE cache_meta ADD COLUMN key_verification_hash TEXT").execute(&pool).await;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_cache_content_hash ON cache_meta (content_hash)")
             .execute(&pool)

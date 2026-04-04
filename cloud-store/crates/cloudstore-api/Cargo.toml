@@ -32,3 +32,10 @@ hyper-rustls = { workspace = true }
 hyper-util = { workspace = true }
 bytes = { workspace = true }
 urlencoding = { workspace = true }
+tokio-stream = "0.1.18"
+futures-util.workspace = true
+chacha20 = "0.10"
+cipher = "0.4"
+hex = "0.4.3"
+rand = "0.8"
+sha2.workspace = true
