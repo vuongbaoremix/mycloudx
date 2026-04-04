@@ -58,3 +58,41 @@ When updating fields, `Bind` works seamlessly over JSON if passing standard Serd
 ## Many-to-Many Relationships
 
 Do NOT store large relational arrays in JSON strings. If relationships are complex (like `album_media`), **create a junction table** (`album_media` with `album_id` and `media_id`). Fetch with standard JOINs.
+
+## Boolean Fields
+
+SQLite stores booleans as `INTEGER` (0/1). In Rust models, use `bool` — sqlx handles the conversion automatically:
+
+```rust
+pub is_encrypted: bool,        // stored as INTEGER DEFAULT 0
+pub encryption_enabled: bool,  // stored as INTEGER DEFAULT 0
+```
+
+## Optional Fields with Default Values
+
+When adding columns via migrations, always provide a DEFAULT to avoid breaking existing rows:
+
+```sql
+ALTER TABLE user ADD COLUMN encryption_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE media ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0;
+```
+
+In Rust, use `Option<T>` for nullable columns or bare types with defaults:
+```rust
+pub encrypted_master_key: Option<String>,  // nullable TEXT
+pub encryption_enabled: bool,              // NOT NULL DEFAULT 0
+```
+
+## JSON Extraction in Queries
+
+Use `json_extract()` for querying into JSON fields:
+
+```sql
+-- Query location data from JSON metadata
+SELECT * FROM media 
+WHERE json_extract(metadata, '$.location.lat') IS NOT NULL
+
+-- Query thumbnail paths
+SELECT * FROM media 
+WHERE json_extract(thumbnails, '$.micro') = ?
+```

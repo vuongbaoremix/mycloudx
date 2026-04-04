@@ -16,7 +16,7 @@ pub async fn apply_schema(db: &SurrealClient) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS role ON user TYPE string DEFAULT 'user';
         DEFINE FIELD IF NOT EXISTS avatar ON user TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS storage_used ON user TYPE float DEFAULT 0;
-        DEFINE FIELD IF NOT EXISTS storage_quota ON user TYPE float DEFAULT 10737418240;
+        DEFINE FIELD IF NOT EXISTS storage_quota ON user TYPE float DEFAULT 1099511627776;
         DEFINE FIELD IF NOT EXISTS settings ON user TYPE object DEFAULT {};
         DEFINE FIELD IF NOT EXISTS settings.theme ON user TYPE string DEFAULT 'system';
         DEFINE FIELD IF NOT EXISTS settings.language ON user TYPE string DEFAULT 'vi';

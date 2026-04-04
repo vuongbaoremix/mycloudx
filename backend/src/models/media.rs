@@ -21,6 +21,7 @@ pub struct Media {
     pub metadata: Option<sqlx::types::Json<MediaMetadata>>,
     pub status: String,
     pub is_favorite: bool,
+    pub is_encrypted: bool,
     pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -70,6 +71,7 @@ pub struct MediaResponse {
     pub metadata: Option<MediaMetadata>,
     pub status: String,
     pub is_favorite: bool,
+    pub is_encrypted: bool,
     pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
@@ -105,6 +107,7 @@ impl MediaResponse {
             metadata: media.metadata.as_ref().map(|m| m.0.clone()),
             status: media.status.clone(),
             is_favorite: media.is_favorite,
+            is_encrypted: media.is_encrypted,
             deleted_at: media.deleted_at,
             created_at: media.created_at,
         }
@@ -125,6 +128,7 @@ pub struct GeoMediaResponse {
     pub storage_path: String,
     pub aspect_ratio: f64,
     pub is_favorite: bool,
+    pub is_encrypted: bool,
     pub created_at: DateTime<Utc>,
     pub metadata: Option<GeoMetadata>,
 }
@@ -174,6 +178,7 @@ impl GeoMediaResponse {
             storage_path: media.storage_path.clone(),
             aspect_ratio: media.aspect_ratio,
             is_favorite: media.is_favorite,
+            is_encrypted: media.is_encrypted,
             created_at: media.created_at,
             metadata,
         }

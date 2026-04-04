@@ -12,6 +12,9 @@ pub struct User {
     pub storage_used: f64,
     pub storage_quota: f64,
     pub settings: sqlx::types::Json<UserSettings>,
+    pub encrypted_master_key: Option<String>,
+    pub encryption_salt: Option<String>,
+    pub encryption_enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -44,6 +47,7 @@ pub struct UserResponse {
     pub storage_used: f64,
     pub storage_quota: f64,
     pub settings: UserSettings,
+    pub encryption_enabled: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -58,6 +62,7 @@ impl UserResponse {
             storage_used: user.storage_used,
             storage_quota: user.storage_quota,
             settings: user.settings.0.clone(),
+            encryption_enabled: user.encryption_enabled,
             created_at: user.created_at,
         }
     }

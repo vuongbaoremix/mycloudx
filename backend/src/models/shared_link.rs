@@ -14,6 +14,7 @@ pub struct SharedLink {
     pub view_count: i32,
     pub max_views: Option<i32>,
     pub is_active: bool,
+    pub sealed_master_key: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

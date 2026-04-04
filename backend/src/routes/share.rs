@@ -68,8 +68,8 @@ pub async fn create_share(
     let media_ids_json = serde_json::to_string(&body.media_ids).unwrap();
 
     sqlx::query(
-        "INSERT INTO shared_link (id, user_id, token, share_type, media_ids, album_id, password_hash, expires_at, view_count, max_views, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)"
+        "INSERT INTO shared_link (id, user_id, token, share_type, media_ids, album_id, password_hash, expires_at, view_count, max_views, is_active, sealed_master_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)"
     )
     .bind(&id)
     .bind(&claims.sub)
@@ -80,6 +80,7 @@ pub async fn create_share(
     .bind(password_hash)
     .bind(expires_at)
     .bind(body.max_views)
+    .bind(&claims.encrypted_mk)
     .execute(&state.db)
     .await
     .map_err(|e| {

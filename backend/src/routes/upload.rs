@@ -277,6 +277,11 @@ async fn finalize_upload(
     } else {
         "ready"
     };
+    // Derive encryption key if user has encryption enabled
+    let encryption_key = claims.master_key(&state.config.jwt_secret)
+        .map(|mk| crate::crypto::derive_dek(&mk, &record_id));
+    let is_encrypted = encryption_key.is_some();
+
     let meta_str = if metadata_json.is_null() {
         None
     } else {
@@ -290,8 +295,8 @@ async fn finalize_upload(
     sqlx::query(
         "INSERT INTO media (id, user_id, filename, original_name, mime_type, size, file_hash, \
          width, height, aspect_ratio, thumbnails, storage_path, storage_provider, blur_hash, \
-         metadata, status, is_favorite)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', NULL, ?, ?, 0)",
+         metadata, status, is_favorite, is_encrypted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', NULL, ?, ?, 0, ?)",
     )
     .bind(&record_id)
     .bind(&user_id)
@@ -307,6 +312,7 @@ async fn finalize_upload(
     .bind(&storage_path)
     .bind(meta_str)
     .bind(status)
+    .bind(is_encrypted)
     .execute(&state.db)
     .await
     .map_err(|e| {
@@ -334,6 +340,7 @@ async fn finalize_upload(
         mime_type: mime_type.clone(),
         video_thumb_path,
         orientation,
+        encryption_key,
     });
 
     // Update storage usage

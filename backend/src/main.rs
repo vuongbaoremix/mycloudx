@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod crypto;
 mod db;
 mod error;
 mod imaging;
@@ -181,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/user/profile", get(routes::user::get_profile))
         .route("/user/profile", put(routes::user::update_profile))
         .route("/user/password", put(routes::user::change_password))
+        .route("/user/search", get(routes::user::search_users))
         // Auth
         .route("/auth/download-token", get(routes::auth::get_download_token))
         // Albums
@@ -197,6 +199,11 @@ async fn main() -> anyhow::Result<()> {
             "/albums/{id}/media",
             delete(routes::album::remove_media_from_album),
         )
+        // Collaborators
+        .route("/albums/{id}/collaborators", get(routes::album::list_collaborators))
+        .route("/albums/{id}/collaborators", post(routes::album::add_collaborator))
+        .route("/albums/{id}/collaborators/{user_id}", put(routes::album::update_collaborator))
+        .route("/albums/{id}/collaborators/{user_id}", delete(routes::album::remove_collaborator))
         // Admin
         .route("/admin/stats", get(routes::admin::get_stats))
         .route("/admin/dashboard", get(routes::admin::get_dashboard))
@@ -211,12 +218,21 @@ async fn main() -> anyhow::Result<()> {
         .route("/share", post(routes::share::create_share))
         .route("/share", get(routes::share::list_shares))
         .route("/share/{id}", delete(routes::share::delete_share))
+        // Notifications
+        .route("/notifications", get(routes::notification::list_notifications))
+        .route("/notifications/read-all", put(routes::notification::mark_all_notifications_read))
+        .route("/notifications/{id}/read", put(routes::notification::mark_notification_read))
         // Search
         .route("/search", get(routes::search::search_media))
         // Explorer
         .route("/explorer/memories", get(routes::explorer::get_memories))
         .route("/explorer/screenshots", get(routes::explorer::get_screenshots))
         .route("/explorer/stats", get(routes::explorer::get_stats))
+        // Encryption
+        .route("/encryption/enable", post(routes::encryption::enable_encryption))
+        .route("/encryption/disable", post(routes::encryption::disable_encryption))
+        .route("/encryption/status", get(routes::encryption::encryption_status))
+        .route("/encryption/recover", post(routes::encryption::recover_encryption))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::require_auth,

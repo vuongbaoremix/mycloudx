@@ -189,14 +189,169 @@ pub async fn restore_media(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct ServeQuery {
+    pub token: Option<String>,
+    pub download: Option<bool>,
+}
+
 /// GET /api/media/serve/:path
 pub async fn serve_file(
     State(state): State<AppState>,
     Path(file_path): Path<String>,
+    Query(query): Query<ServeQuery>,
     req: axum::extract::Request,
 ) -> Result<axum::response::Response, StatusCode> {
     let decoded = urlencoding::decode(&file_path).unwrap_or_default().to_string();
     
+    let mut download_filename = None;
+    let mut encryption_key = None;
+
+    let media_record = sqlx::query_as::<_, Media>(
+        "SELECT * FROM media WHERE storage_path = ? LIMIT 1"
+    )
+    .bind(&decoded)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let active_media = if let Some(ref m) = media_record {
+        download_filename = Some(m.original_name.clone());
+        Some(m.clone())
+    } else {
+        let parts: Vec<&str> = decoded.splitn(2, '/').collect();
+        if let Some(user_id_prefix) = parts.first() {
+            sqlx::query_as::<_, Media>(
+                "SELECT * FROM media WHERE user_id = ? AND \
+                 (json_extract(thumbnails, '$.micro') = ? OR json_extract(thumbnails, '$.small') = ? \
+                  OR json_extract(thumbnails, '$.medium') = ? OR json_extract(thumbnails, '$.large') = ? \
+                  OR json_extract(thumbnails, '$.web') = ?) LIMIT 1"
+            )
+            .bind(user_id_prefix)
+            .bind(&decoded).bind(&decoded).bind(&decoded).bind(&decoded).bind(&decoded)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        } else {
+            None
+        }
+    };
+
+    if let Some(ref media) = active_media {
+        if download_filename.is_none() {
+            download_filename = Some(media.original_name.clone());
+        }
+
+        if media.is_encrypted {
+            let mut sealed_mk = None;
+            let mut expected_user_id = media.user_id.clone();
+            
+            // 1. Try to authenticate the user fetching the image via `__mc` cookie
+            let mut current_user_id = None;
+            for cookie in req.headers().get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()).flat_map(|s| s.split(';')) {
+                let parts: Vec<&str> = cookie.splitn(2, '=').collect();
+                if parts.len() == 2 {
+                    let name = parts[0].trim();
+                    let value = parts[1].trim();
+                    if name == "__mc" {
+                        if let Ok(claims) = crate::auth::jwt::verify_token(value, &state.config.jwt_secret) {
+                            current_user_id = Some(claims.sub);
+                        }
+                    } else if name == "__mc_mk" && current_user_id.is_none() {
+                        // Fallback: If no __mc parsed yet, we can't reliably use __mc_mk unless it's the owner's
+                        sealed_mk = Some(value.to_string());
+                    }
+                }
+            }
+
+            // 2. If the user is authenticated, determine whose master key we need
+            if let Some(uid) = current_user_id {
+                if uid == media.user_id {
+                    // It's the owner! Their own __mc_mk cookie is correct.
+                    sealed_mk = req.headers().get_all(header::COOKIE).iter()
+                        .filter_map(|v| v.to_str().ok()).flat_map(|s| s.split(';'))
+                        .find_map(|s| {
+                            let (k, v) = s.split_once('=')?;
+                            if k.trim() == "__mc_mk" { Some(v.trim().to_string()) } else { None }
+                        });
+                } else {
+                    // Not the owner. Check if it's an album collaborator
+                    let collab_sealed_mk: Option<String> = sqlx::query_scalar(
+                        "SELECT ac.sealed_master_key FROM album_collaborator ac 
+                         JOIN album_media am ON ac.album_id = am.album_id 
+                         WHERE am.media_id = ? AND ac.user_id = ? LIMIT 1"
+                    )
+                    .bind(&media.id)
+                    .bind(&uid)
+                    .fetch_optional(&state.db)
+                    .await
+                    .unwrap_or(None);
+
+                    if let Some(smk) = collab_sealed_mk {
+                        sealed_mk = Some(smk);
+                        // The sealed_master_key in album_collaborator belongs to the owner!
+                        expected_user_id = media.user_id.clone();
+                    } else {
+                        // Reset sealed_mk because the cookie one belongs to the collaborator, which won't decrypt the owner's file
+                        sealed_mk = None;
+                    }
+                }
+            }
+
+            // 3. Fallback to public share link checking
+            if sealed_mk.is_none() {
+                if let Some(ref token) = query.token {
+                    use crate::models::shared_link::SharedLink;
+                    let link = sqlx::query_as::<_, SharedLink>("SELECT * FROM shared_link WHERE token = ? AND is_active = 1 LIMIT 1")
+                        .bind(token)
+                        .fetch_optional(&state.db)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+                    if let Some(l) = link {
+                        let is_valid = match l.expires_at {
+                            Some(exp) => chrono::Utc::now() <= exp,
+                            None => true,
+                        };
+                        
+                        if is_valid {
+                            let mut authorized = false;
+                            if l.share_type == "album" {
+                                if let Some(album_id) = &l.album_id {
+                                    let count: i32 = sqlx::query_scalar("SELECT 1 FROM album_media WHERE album_id = ? AND media_id = ?")
+                                        .bind(album_id)
+                                        .bind(&media.id)
+                                        .fetch_optional(&state.db)
+                                        .await
+                                        .unwrap_or(None)
+                                        .unwrap_or(0);
+                                    authorized = count > 0;
+                                }
+                            } else {
+                                authorized = l.media_ids.0.contains(&media.id);
+                            }
+
+                            if authorized {
+                                sealed_mk = l.sealed_master_key;
+                                expected_user_id = l.user_id;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(sealed) = sealed_mk {
+                let mk = crate::crypto::unseal_master_key(&sealed, &state.config.jwt_secret, &expected_user_id)
+                    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+                encryption_key = Some(crate::crypto::derive_dek(&mk, &media.id));
+            } else {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
+    }
+    
+    let is_download = query.download.unwrap_or(false);
+
     // Efficient local file streaming with Range support
     if let Some(local_path) = state.storage.get_local_path(&decoded) {
         use tower::ServiceExt;
@@ -212,6 +367,14 @@ pub async fn serve_file(
             header::CACHE_CONTROL,
             header::HeaderValue::from_static("public, max-age=31536000")
         );
+        
+        if is_download {
+            if let Some(fname) = download_filename {
+                if let Ok(cd) = axum::http::header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", fname)) {
+                    res.headers_mut().insert(axum::http::header::CONTENT_DISPOSITION, cd);
+                }
+            }
+        }
         return Ok(res);
     }
 
@@ -223,9 +386,26 @@ pub async fn serve_file(
         if let Some(api_key) = state.config.cloudstore_api_key.as_deref() {
             req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
         }
+
+        // Inject encryption key if media is encrypted
+        if let Some(ref dek) = encryption_key {
+            req_builder = req_builder.header("X-Encryption-Key", dek);
+        }
         
-        if let Some(range) = req.headers().get(axum::http::header::RANGE) {
-            req_builder = req_builder.header(reqwest::header::RANGE, range.clone());
+        // Forward HTTP Range & Caching request headers to cloud-store
+        let request_headers_to_forward = [
+            axum::http::header::RANGE,
+            axum::http::header::IF_RANGE,
+            axum::http::header::IF_MATCH,
+            axum::http::header::IF_NONE_MATCH,
+            axum::http::header::IF_MODIFIED_SINCE,
+            axum::http::header::IF_UNMODIFIED_SINCE,
+        ];
+        
+        for h in request_headers_to_forward {
+            if let Some(val) = req.headers().get(&h) {
+                req_builder = req_builder.header(h, val.clone());
+            }
         }
         
         let upstream_res = req_builder.send().await
@@ -237,11 +417,15 @@ pub async fn serve_file(
         let mut res_builder = axum::http::Response::builder()
             .status(upstream_res.status());
             
+        // Forward essential response headers from cloud-store back to the client
         let headers_to_forward = [
             reqwest::header::CONTENT_TYPE,
             reqwest::header::CONTENT_LENGTH,
             reqwest::header::CONTENT_RANGE,
             reqwest::header::ACCEPT_RANGES,
+            reqwest::header::ETAG,
+            reqwest::header::LAST_MODIFIED,
+            reqwest::header::CONTENT_DISPOSITION,
         ];
         
         if let Some(headers) = res_builder.headers_mut() {
@@ -251,6 +435,14 @@ pub async fn serve_file(
                 }
             }
             headers.insert(axum::http::header::CACHE_CONTROL, axum::http::header::HeaderValue::from_static("public, max-age=31536000"));
+            
+            if is_download {
+                if let Some(fname) = download_filename.as_ref() {
+                    if let Ok(cd) = axum::http::header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", fname)) {
+                        headers.insert(axum::http::header::CONTENT_DISPOSITION, cd);
+                    }
+                }
+            }
         }
 
         let body = axum::body::Body::from_stream(upstream_res.bytes_stream());
@@ -266,8 +458,16 @@ pub async fn serve_file(
     let mut res = axum::response::IntoResponse::into_response(data);
     res.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_str(&content_type).unwrap());
     res.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("public, max-age=31536000"));
+    if is_download {
+        if let Some(fname) = download_filename {
+            if let Ok(cd) = header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", fname)) {
+                res.headers_mut().insert(header::CONTENT_DISPOSITION, cd);
+            }
+        }
+    }
     Ok(res)
 }
+
 
 /// GET /api/media/:id/download
 pub async fn download_file(
@@ -276,7 +476,16 @@ pub async fn download_file(
     Path(id): Path<String>,
     req: axum::extract::Request,
 ) -> Result<axum::response::Response, StatusCode> {
-    let media = sqlx::query_as::<_, Media>("SELECT * FROM media WHERE id = ? AND user_id = ? LIMIT 1")
+    let media = sqlx::query_as::<_, Media>(
+        r#"
+        SELECT m.* FROM media m
+        LEFT JOIN album_media am ON m.id = am.media_id
+        LEFT JOIN album_collaborator ac ON am.album_id = ac.album_id AND ac.user_id = ?
+        WHERE m.id = ? AND (m.user_id = ? OR ac.can_download = 1)
+        LIMIT 1
+        "#
+    )
+        .bind(&claims.sub)
         .bind(&id)
         .bind(&claims.sub)
         .fetch_optional(&state.db)
@@ -310,9 +519,51 @@ pub async fn download_file(
         if let Some(api_key) = state.config.cloudstore_api_key.as_deref() {
             req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
         }
+
+        // Inject encryption key if media is encrypted
+        if media.is_encrypted {
+            let mut mk = None;
+            if media.user_id == claims.sub {
+                mk = claims.master_key(&state.config.jwt_secret);
+            } else {
+                let collab_sealed_mk: Option<String> = sqlx::query_scalar(
+                    "SELECT ac.sealed_master_key FROM album_collaborator ac 
+                     JOIN album_media am ON ac.album_id = am.album_id 
+                     WHERE am.media_id = ? AND ac.user_id = ? LIMIT 1"
+                )
+                .bind(&media.id)
+                .bind(&claims.sub)
+                .fetch_optional(&state.db)
+                .await
+                .unwrap_or(None);
+
+                if let Some(smk) = collab_sealed_mk {
+                    mk = crate::crypto::unseal_master_key(&smk, &state.config.jwt_secret, &media.user_id).ok();
+                }
+            }
+
+            if let Some(mk_bytes) = mk {
+                let dek = crate::crypto::derive_dek(&mk_bytes, &media.id);
+                req_builder = req_builder.header("X-Encryption-Key", dek);
+            } else {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
         
-        if let Some(range) = req.headers().get(axum::http::header::RANGE) {
-            req_builder = req_builder.header(reqwest::header::RANGE, range.clone());
+        // Forward HTTP Range & Caching request headers to cloud-store
+        let request_headers_to_forward = [
+            axum::http::header::RANGE,
+            axum::http::header::IF_RANGE,
+            axum::http::header::IF_MATCH,
+            axum::http::header::IF_NONE_MATCH,
+            axum::http::header::IF_MODIFIED_SINCE,
+            axum::http::header::IF_UNMODIFIED_SINCE,
+        ];
+        
+        for h in request_headers_to_forward {
+            if let Some(val) = req.headers().get(&h) {
+                req_builder = req_builder.header(h, val.clone());
+            }
         }
         
         let upstream_res = req_builder.send().await
@@ -324,11 +575,14 @@ pub async fn download_file(
         let mut res_builder = axum::http::Response::builder()
             .status(upstream_res.status());
             
+        // Forward essential response headers from cloud-store back to the client
         let headers_to_forward = [
             reqwest::header::CONTENT_TYPE,
             reqwest::header::CONTENT_LENGTH,
             reqwest::header::CONTENT_RANGE,
             reqwest::header::ACCEPT_RANGES,
+            reqwest::header::ETAG,
+            reqwest::header::LAST_MODIFIED,
         ];
         
         if let Some(headers) = res_builder.headers_mut() {
@@ -339,8 +593,8 @@ pub async fn download_file(
             }
             
             headers.insert(
-                header::CONTENT_DISPOSITION,
-                header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", media.original_name)).unwrap()
+                axum::http::header::CONTENT_DISPOSITION,
+                axum::http::header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", media.original_name)).unwrap()
             );
         }
 

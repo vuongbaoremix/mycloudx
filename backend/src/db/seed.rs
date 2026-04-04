@@ -21,7 +21,7 @@ pub async fn seed_admin(db: &DbPool, config: &Config) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO user (id, name, email, password_hash, role, storage_used, storage_quota, settings)
-        VALUES (?, ?, ?, ?, 'admin', 0.0, 10737418240.0, '{"theme":"system","language":"vi","gallery_columns":4}')
+        VALUES (?, ?, ?, ?, 'admin', 0.0, 1099511627776.0, '{"theme":"system","language":"vi","gallery_columns":4}')
         "#
     )
     .bind(admin_id)

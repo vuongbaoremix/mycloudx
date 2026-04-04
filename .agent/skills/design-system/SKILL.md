@@ -71,6 +71,8 @@ Add or remove the `dark` and `light` class on the `<html>` element. The custom s
 | `hover:bg-gray-100 dark:hover:bg-white/10` | `hover:bg-surface-container` |
 | `style={{ fontSize: 20, fontWeight: 600 }}` | Tailwind: `text-xl font-semibold` |
 
+**Exception:** Status/accent colors like `text-green-500`, `text-amber-500`, `bg-blue-500/10` are acceptable for specific UI indicators (e.g., encryption status badges, tab icons).
+
 ## Standardized Component Patterns
 
 ### Page Headings
@@ -91,8 +93,8 @@ All modals MUST follow this exact structure:
       </h3>
       {/* Content */}
       <div className="flex gap-3 justify-end mt-8">
-        <button className="btn btn-secondary px-6" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary px-6" onClick={onConfirm}>Confirm</button>
+        <button className="btn btn-secondary px-6" onClick={onClose}>Hủy</button>
+        <button className="btn btn-primary px-6" onClick={onConfirm}>Xác nhận</button>
       </div>
     </div>
   </div>
@@ -105,6 +107,34 @@ All modals MUST follow this exact structure:
 - Heading: `text-2xl font-bold font-headline text-on-surface tracking-tight`
 - Form labels: `text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-2`
 - Buttons: Always use `px-6` for consistent padding
+
+### Card/Section Pattern
+Settings and dashboard cards use this pattern:
+```tsx
+<div className="bg-surface-container-lowest border border-outline-variant/20 rounded-3xl p-6 md:p-8 shadow-sm">
+  {/* Section heading */}
+  <h2 className="text-xl font-bold text-on-surface mb-2">Section Title</h2>
+  <p className="text-on-surface-variant text-sm">Description text.</p>
+  {/* Content */}
+</div>
+```
+
+### Form Input Pattern
+```tsx
+<div className="form-group">
+  <label className="form-label">Label Text</label>
+  <input className="form-input bg-surface-container-low" value={value} onChange={...} />
+</div>
+```
+
+### Status Badge Pattern
+```tsx
+<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+  isActive ? 'bg-green-500/10 text-green-500' : 'bg-amber-500/10 text-amber-500'
+}`}>
+  <Icon size={20} strokeWidth={2.5} />
+</div>
+```
 
 ### View Mode Toggle
 Use the reusable `ViewModeToggle` component for grid size switching:
@@ -239,3 +269,12 @@ Image transitions use CSS crossfade (no Framer Motion `AnimatePresence` for main
 | Failed | Thất bại |
 | Synced | Đã đồng bộ |
 | Syncing | Đang đồng bộ |
+| Encryption | Mã hóa |
+| Enable Encryption | Bật mã hóa |
+| Disable Encryption | Tắt mã hóa |
+| Recovery Key | Khóa khôi phục |
+| Encrypted | Đã mã hóa |
+| Not Encrypted | Chưa mã hóa |
+| Security | Bảo mật |
+| Password | Mật khẩu |
+| Confirm | Xác nhận |

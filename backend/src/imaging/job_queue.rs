@@ -19,6 +19,8 @@ pub struct ProcessJob {
     pub mime_type: String,
     pub video_thumb_path: Option<PathBuf>,
     pub orientation: Option<i32>,
+    /// Optional DEK (hex) for encrypting uploads to CloudStore
+    pub encryption_key: Option<String>,
 }
 
 /// A handle to the processing queue.
@@ -144,8 +146,9 @@ async fn process_job(
                 let d = data.clone();
                 let s = storage.clone();
                 let p = job.storage_path.clone();
+                let ek = job.encryption_key.clone();
                 async move {
-                    let r = upload_original(&d, &p, &s).await;
+                    let r = upload_original_encrypted(&d, &p, &s, ek.as_deref()).await;
                     tracing::info!("Worker job {}: upload original done in {:?}", job.record_id, t_upload.elapsed());
                     r
                 }
@@ -156,8 +159,9 @@ async fn process_job(
                 let p = job.storage_path.clone();
                 let id = job.record_id.clone();
                 let ori = job.orientation;
+                let ek = job.encryption_key.clone();
                 async move {
-                    let r = thumbnail::generate_thumbnails(d, p, st, ori).await;
+                    let r = thumbnail::generate_thumbnails(d, p, st, ori, ek).await;
                     tracing::info!("Worker job {}: thumbnails done in {:?}", id, t_thumb.elapsed());
                     r
                 }
@@ -180,13 +184,14 @@ async fn process_job(
                             let d = data.clone();
                             let s = storage.clone();
                             let p = job.storage_path.clone();
+                            let ek = job.encryption_key.clone();
                             async move {
-                                let r = upload_original(&d, &p, &s).await;
+                                let r = upload_original_encrypted(&d, &p, &s, ek.as_deref()).await;
                                 tracing::info!("Worker job {}: video upload done in {:?}", job.record_id, t_upload.elapsed());
                                 r
                             }
                         },
-                        thumbnail::generate_thumbnails(thumb_data, job.storage_path.clone(), storage.clone(), None)
+                        thumbnail::generate_thumbnails(thumb_data, job.storage_path.clone(), storage.clone(), None, job.encryption_key.clone())
                     );
 
                     upload_res?;
@@ -200,7 +205,7 @@ async fn process_job(
                 }
                 Err(e) => {
                     tracing::error!("Worker job {}: read frontend thumb failed: {}", job.record_id, e);
-                    upload_original(&data, &job.storage_path, storage).await?;
+                    upload_original_encrypted(&data, &job.storage_path, storage, job.encryption_key.as_deref()).await?;
                     mark_ready(db, &job.record_id).await?;
                 }
             }
@@ -208,11 +213,11 @@ async fn process_job(
             // Cleanup thumb file
             let _ = tokio::fs::remove_file(thumb_path).await;
         } else {
-            upload_original(&data, &job.storage_path, storage).await?;
+            upload_original_encrypted(&data, &job.storage_path, storage, job.encryption_key.as_deref()).await?;
             mark_ready(db, &job.record_id).await?;
         }
     } else {
-        upload_original(&data, &job.storage_path, storage).await?;
+        upload_original_encrypted(&data, &job.storage_path, storage, job.encryption_key.as_deref()).await?;
         mark_ready(db, &job.record_id).await?;
     }
 
@@ -225,12 +230,13 @@ async fn process_job(
 }
 
 
-async fn upload_original(
+async fn upload_original_encrypted(
     data: &[u8],
     storage_path: &str,
     storage: &Arc<dyn StorageProvider>,
+    encryption_key: Option<&str>,
 ) -> Result<()> {
-    storage.upload(data, storage_path).await?;
+    storage.upload_encrypted(data, storage_path, encryption_key).await?;
     Ok(())
 }
 

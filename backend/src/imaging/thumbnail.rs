@@ -37,6 +37,7 @@ pub async fn generate_thumbnails(
     storage_path: String,
     storage: Arc<dyn StorageProvider>,
     orientation: Option<i32>,
+    encryption_key: Option<String>,
 ) -> Result<ThumbnailResult> {
     let t_start = std::time::Instant::now();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(ThumbnailSize, Vec<u8>)>();
@@ -137,8 +138,9 @@ pub async fn generate_thumbnails(
     while let Some((size, webp_data)) = rx.recv().await {
         let st = storage.clone();
         let path = storage_path.clone();
+        let enc_key = encryption_key.clone();
         join_set.spawn(async move {
-            let res_path = st.upload_thumbnail(&webp_data, &path, size).await?;
+            let res_path = st.upload_thumbnail_encrypted(&webp_data, &path, size, enc_key.as_deref()).await?;
             Ok::<_, anyhow::Error>((size, res_path))
         });
     }
