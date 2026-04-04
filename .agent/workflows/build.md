@@ -29,3 +29,6 @@ docker compose -f deploy\docker-compose.yml up -d
 - Docker image is `scratch`-based (~15-20MB)
 - TLS certs bundled via `webpki-roots` (no ca-certificates needed)
 - Data persists in Docker volume mapped to `/data`
+- `JWT_SECRET` in production must be a strong random string (also used to seal encryption Master Key)
+- CloudStore should be deployed separately if using `STORAGE_PROVIDER=cloudstore`
+- To prevent mtime caching bugs: `RUN find src -type f -exec touch {} +` before compiling real source

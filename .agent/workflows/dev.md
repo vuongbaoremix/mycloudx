@@ -5,28 +5,39 @@ description: How to run the development environment
 
 ## Steps
 
-1. Start the backend server:
+1. Start the CloudStore service (if using cloudstore storage):
 ```powershell
-Set-Location backend; cargo run
+Set-Location cloud-store; .\dev.bat
 ```
-Server starts at `http://localhost:3000`
+CloudStore starts at its configured port (see `cloud-store/.env`)
 
-2. Start the frontend dev server (in a separate terminal):
+2. Start the backend server:
+```powershell
+Set-Location backend; .\dev.bat
+```
+Server starts at `http://localhost:3000`. Auto-applies pending SQL migrations.
+
+3. Start the frontend dev server (in a separate terminal):
 ```powershell
 Set-Location frontend; bun dev
 ```
 Frontend dev server at `http://localhost:5173` with proxy to backend
-
-3. Hỏi người dùng xác nhận server đã chạy thành công (nếu cần kiểm tra giao diện hoặc chức năng, hỏi người dùng cung cấp screenshot hoặc mô tả kết quả)
 
 4. Login with default admin credentials:
 - Email: `admin@mycloud.local`
 - Password: `Admin@123456`
 
 ## Notes
-- Backend must be started first (API dependency)
+- CloudStore must be started first if `STORAGE_PROVIDER=cloudstore`
+- Backend must be started before frontend (API dependency)
 - Frontend hot-reloads on changes
-- Backend requires manual restart on Rust changes
-- Use `cargo watch -x run` for auto-restart (install with `cargo install cargo-watch`)
-- Auto-applies SQLite schema migrations on start.
+- Backend requires manual restart on Rust changes (or use `cargo watch -x run`)
+- Auto-applies SQLite schema migrations on start via `sqlx::migrate!`
 - **Không tự mở trình duyệt để test** — hỏi người dùng nếu cần xác minh UI
+
+## Encryption Testing
+After login, go to **Settings → Bảo mật & Mật khẩu → Mã hóa dữ liệu (E2EE)**:
+1. Enter current password in the confirmation field
+2. Click "Bật mã hóa" to enable
+3. **Save the Recovery Key** shown in the modal — it's only displayed once
+4. New uploads will be encrypted; existing files remain unencrypted

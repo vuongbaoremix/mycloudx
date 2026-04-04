@@ -24,10 +24,23 @@ pub async fn my_handler(
 pub mod {name};
 ```
 
-5. Mount the route in `backend/src/main.rs` inside `api_routes`:
+5. Mount the route in `backend/src/main.rs` inside `protected_routes` (or `public_routes` for unauthenticated):
 ```rust
+// Protected (requires JWT):
 .route("/my-route", get(routes::{name}::my_handler))
+
+// Public (no auth):
+// Add to `public_routes` Router instead
 ```
+
+6. Add the corresponding frontend API method in `frontend/src/api/client.ts`:
+```typescript
+async myMethod(param: string) {
+  return this.request<ResponseType>(`/my-endpoint/${param}`);
+}
+```
+
+7. Update `AGENT.md` API endpoints table with the new route
 
 ## Database Interaction
 
@@ -46,3 +59,12 @@ sqlx::query("INSERT INTO my_table (name, user_id) VALUES (?, ?)")
     .execute(&state.db)
     .await?;
 ```
+
+## Encryption-Aware Routes
+
+If the route handles file data that may be encrypted:
+
+1. Check `media.is_encrypted` from the DB record
+2. Extract the Master Key from JWT claims (`claims.master_key(&state.config.jwt_secret)`) or from `__mc_mk` cookie
+3. Derive the DEK: `crate::crypto::derive_dek(&mk, &media.id)`
+4. Pass DEK to storage provider's `*_encrypted` methods or inject `X-Encryption-Key` header

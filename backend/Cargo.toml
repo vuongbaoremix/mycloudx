@@ -48,6 +48,14 @@ async-trait = "0.1"
 urlencoding = "2"
 sysinfo = "0.30"
 
+# Encryption
+argon2 = "0.5"
+aes-gcm = "0.10"
+hkdf = "0.12"
+rand = "0.9"
+bs58 = "0.5"
+base64 = "0.22"
+
 # TLS (for scratch image)
 webpki-roots = "0.26"
 

@@ -26,7 +26,7 @@ import PageName from './pages/PageName'
 
 4. (Optional) Add navigation in `frontend/src/components/layout/Sidebar.tsx`:
 ```tsx
-{ icon: IconComponent, label: 'Page Name', path: '/page-name' }
+{ icon: IconComponent, label: 'Tên trang', path: '/page-name' }
 ```
 
 5. Add any new API methods to `frontend/src/api/client.ts`:
@@ -44,9 +44,14 @@ Set-Location frontend; bun run build
 7. Hỏi người dùng kiểm tra trang mới trên trình duyệt và xác nhận kết quả
 
 ## Design System
-- Use TailwindCSS with semantic tokens (see `.agent/skills/design-system/SKILL.md`)
+- Use TailwindCSS v3 with semantic tokens (see `.agent/skills/design-system/SKILL.md`)
 - Colors: `bg-surface`, `text-on-surface`, `text-on-surface-variant`, `bg-primary`, etc.
 - Button classes: `btn btn-primary`, `btn btn-secondary`, `btn btn-ghost`, `btn btn-danger`
 - Fonts: `font-headline` (Manrope), `font-body` (Inter)
 - Icons: `material-symbols-outlined` or `lucide-react`
+- Borders: `border-outline-variant/15` to `border-outline-variant/30` (never full opacity)
 - All UI text **must** be in Vietnamese
+
+## Existing Pages (15)
+Gallery, Favorites, Trash, Albums, AlbumDetail, Admin, Dashboard,
+Settings, Map, Explorer, Mosaic, SharedLinks, PublicShare, Login, Register
